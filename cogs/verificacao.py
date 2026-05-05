@@ -47,6 +47,12 @@ class VerificacaoCog(commands.Cog):
         cargo_dev = guild.get_role(1495614792961097899)
         embed.add_field(name='🏅  Cargo Principal', value=f"Desenvolvedor Verificado: {('✅' if cargo_dev else '❌')}", inline=False)
         embed.add_field(name='🤖  Bot', value=f'Latência: `{round(self.bot.latency * 1000)}ms`', inline=False)
+
+        # Estatísticas de devs verificados
+        from core.database import listar_devs
+        devs = listar_devs()
+        embed.add_field(name='👨‍💻  Devs Verificados', value=f'**{len(devs)}** no sistema', inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):

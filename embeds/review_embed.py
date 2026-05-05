@@ -37,3 +37,18 @@ def criar_embed_review(usuario: discord.Member, resultado: ResultadoScore, githu
     embed.add_field(name='📊  Senioridade Estimada', value=f'`{resultado.senioridade}`', inline=True)
     embed.set_footer(text=f'Enviado para revisão em {formatar_data()}')
     return embed
+
+def criar_embed_review_empregador(usuario: discord.Member, nome: str, titulo: str, descricao: str, score: int, problemas: list) -> discord.Embed:
+    embed = discord.Embed(
+        title='🔎 Revisão Manual Necessária — Empregador',
+        description=f'O membro {usuario.mention} tentou cadastrar um projeto, mas foi retido para análise.',
+        color=COR_REVIEW
+    )
+    embed.set_thumbnail(url=usuario.display_avatar.url)
+    embed.add_field(name='👤 Empregador', value=f'**Nome:** {nome}\n**ID:** `{usuario.id}`', inline=False)
+    embed.add_field(name='📊 Score', value=f'**{score}%**', inline=True)
+    if problemas:
+        embed.add_field(name='⚠️ Problemas', value='\n'.join(f'• {p}' for p in problemas), inline=False)
+    embed.add_field(name='📝 Projeto', value=f'**{titulo}**\n>>> {descricao[:500]}', inline=False)
+    embed.set_footer(text=f'Enviado para revisão em {formatar_data()}')
+    return embed

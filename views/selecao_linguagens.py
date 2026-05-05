@@ -6,9 +6,13 @@ logger = logging.getLogger('bot_freeela.views.selecao_linguagens')
 
 class SelecaoLinguagensView(View):
 
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, github: str, linkedin: str, descricao: str, thread: discord.Thread):
         super().__init__(timeout=300)
         self.user_id = user_id
+        self.github = github
+        self.linkedin = linkedin
+        self.descricao = descricao
+        self.thread = thread
         self.linguagens_selecionadas: list[str] = []
         opcoes = [discord.SelectOption(label=lang, value=lang, emoji=_emoji_linguagem(lang)) for lang in LINGUAGENS_OPCOES]
         select = Select(placeholder='Selecione suas linguagens de programação...', min_values=1, max_values=len(LINGUAGENS_OPCOES), options=opcoes, custom_id='select_linguagens')
@@ -21,9 +25,16 @@ class SelecaoLinguagensView(View):
             return
         self.linguagens_selecionadas = interaction.data['values']
         langs_fmt = ', '.join((f'**{l}**' for l in self.linguagens_selecionadas))
-        embed = discord.Embed(title='✅  Linguagens Selecionadas', description=f'Você selecionou: {langs_fmt}\n\n**Etapa 2 de 3** — Informe seu tempo de experiência.', color=COR_PRINCIPAL)
+        embed = discord.Embed(title='✅  Linguagens Selecionadas', description=f'Você selecionou: {langs_fmt}\n\n**Etapa 3 de 3** — Informe seu tempo de experiência.', color=COR_PRINCIPAL)
         from views.selecao_experiencia import SelecaoExperienciaView
-        view = SelecaoExperienciaView(user_id=self.user_id, linguagens=self.linguagens_selecionadas)
+        view = SelecaoExperienciaView(
+            user_id=self.user_id,
+            github=self.github,
+            linkedin=self.linkedin,
+            descricao=self.descricao,
+            thread=self.thread,
+            linguagens=self.linguagens_selecionadas
+        )
         await interaction.response.edit_message(embed=embed, view=view)
         logger.info('Linguagens selecionadas por %s: %s', interaction.user.name, self.linguagens_selecionadas)
 

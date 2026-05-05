@@ -3,6 +3,19 @@ import logging
 from datetime import datetime, timezone
 logger = logging.getLogger('bot_freeela.utils')
 
+async def enviar_msg_erro_api(thread, user):
+    import discord
+    from config.settings import COR_ERRO, MSG_ERRO_API
+    embed = discord.Embed(
+        title='❌ Erro de Comunicação',
+        description=MSG_ERRO_API,
+        color=COR_ERRO
+    )
+    try:
+        await thread.send(embed=embed)
+    except:
+        pass
+
 def extrair_username_github(url_ou_user: str) -> str | None:
     url_ou_user = url_ou_user.strip().rstrip('/')
     padrao = re.compile('(?:https?://)?(?:www\\.)?github\\.com/([a-zA-Z0-9\\-]+)', re.IGNORECASE)

@@ -14,11 +14,13 @@ class ResultadoScore:
     linguagens_detectadas: list[str] = field(default_factory=list)
     linguagens_confirmadas: list[str] = field(default_factory=list)
     aprovado: bool = False
+    requires_review: bool = False
+    score_final: int = 0
     motivos_reprovacao: list[str] = field(default_factory=list)
     stack_principal: str = ''
     area_principal: str = ''
     senioridade: str = ''
-
+#TODO: transformar em uma API
 def calcular_score(linguagens_selecionadas: list[str], experiencia: str, descricao: str, github_profile: GitHubProfile, linkedin_profile: LinkedInProfile) -> ResultadoScore:
     resultado = ResultadoScore()
     resultado.linguagens_selecionadas = linguagens_selecionadas
