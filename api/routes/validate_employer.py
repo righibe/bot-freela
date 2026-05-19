@@ -14,7 +14,6 @@ from config.settings import (
     PALAVRAS_CHAVE_CATEGORIA,
     CATEGORIAS_PROJETO,
     VALOR_MINIMO_PROJETO,
-    VALOR_MAXIMO_PROJETO,
     DESCRICAO_MINIMA_PROJETO,
     SCORE_EMPREGADOR_MIN,
 )
@@ -25,10 +24,10 @@ router = APIRouter()
 
 # Faixas de valor por complexidade estimada
 COMPLEXIDADE_FAIXAS = {
-    'baixa': (50, 500),
-    'média': (300, 5000),
-    'alta': (2000, 50000),
-    'muito_alta': (10000, 500000),
+    'baixa': (50, None),
+    'média': (50, None),
+    'alta': (50, None),
+    'muito_alta': (50, None),
 }
 
 # Indicadores de complexidade na descrição
@@ -103,16 +102,22 @@ def _estimar_complexidade(descricao: str) -> str:
 
 
 def _verificar_valor_vs_complexidade(valor: float, complexidade: str) -> tuple[bool, str]:
-    """Verifica se o valor é coerente com a complexidade estimada."""
-    faixa = COMPLEXIDADE_FAIXAS.get(complexidade, (50, 500000))
+    """Verifica se o valor é coerente com a complexidade estimada.
+
+    Não há limite máximo de valor para projetos. A validação foca apenas
+    no limite mínimo relativo à complexidade estimada.
+    """
+    faixa = COMPLEXIDADE_FAIXAS.get(complexidade, (50, None))
     min_val, max_val = faixa
 
     if valor < min_val * 0.5:
         return False, (
             f'O valor R$ {valor:.2f} parece muito baixo para um projeto de '
-            f'complexidade {complexidade} (faixa esperada: R$ {min_val:.0f} — R$ {max_val:.0f}).'
+            f'complexidade {complexidade} (mínimo esperado: R$ {min_val:.0f}).'
         )
-    elif valor > max_val * 2:
+
+    # Não verificar limite máximo quando não há faixa máxima definida.
+    if max_val is not None and valor > max_val * 2:
         return False, (
             f'O valor R$ {valor:.2f} parece muito alto para um projeto de '
             f'complexidade {complexidade} (faixa esperada: R$ {min_val:.0f} — R$ {max_val:.0f}).'

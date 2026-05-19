@@ -82,8 +82,10 @@ async def setup_servidor(bot: discord.Client):
     # Canais de Verificação
     canal_verificar_dev = await get_or_create_channel('verificar-dev', cat_verificacao, overrides_leitura_apenas)
     canal_verificar_emp = await get_or_create_channel('verificar-empregador', cat_verificacao, overrides_leitura_apenas)
+    canal_atualizar_perfil = await get_or_create_channel('atualizar-perfil-dev', cat_verificacao, overrides_leitura_apenas)
     canais_ids['CANAL_VERIFICAR_DEV'] = canal_verificar_dev.id
     canais_ids['CANAL_VERIFICAR_EMPREGADOR'] = canal_verificar_emp.id
+    canais_ids['CANAL_ATUALIZAR_PERFIL_DEV'] = canal_atualizar_perfil.id
 
     # A categoria projetos já existe e será usada como container
     # Removido a criação do canal único projetos-disponiveis.
@@ -118,6 +120,11 @@ async def setup_servidor(bot: discord.Client):
     from views.empregador_views import IniciarEmpregadorView
     await verificar_e_enviar(canal_verificar_emp, criar_embed_verificacao_empregador, IniciarEmpregadorView)
 
+    # Enviar embed de atualização de perfil no canal atualizar-perfil-dev
+    from embeds.verificacao_embed import criar_embed_atualizar_perfil
+    from views.atualizar_perfil_dev import AtualizarPerfilDevView
+    await verificar_e_enviar(canal_atualizar_perfil, criar_embed_atualizar_perfil, AtualizarPerfilDevView)
+
     # Atualizar config/settings.py para injetar os IDs reais no lugar dos 0s ou hardcodes antigos
     atualizar_settings(canais_ids, cargos_ids)
     
@@ -125,6 +132,7 @@ async def setup_servidor(bot: discord.Client):
     import config.settings as settings
     settings.CANAL_VERIFICAR_DEV = canais_ids['CANAL_VERIFICAR_DEV']
     settings.CANAL_VERIFICAR_EMPREGADOR = canais_ids['CANAL_VERIFICAR_EMPREGADOR']
+    settings.CANAL_ATUALIZAR_PERFIL_DEV = canais_ids['CANAL_ATUALIZAR_PERFIL_DEV']
     settings.CATEGORIA_PROJETOS_ID = canais_ids['CATEGORIA_PROJETOS_ID']
     settings.CATEGORIA_NEGOCIACAO_ID = canais_ids['CATEGORIA_NEGOCIACAO_ID']
     settings.CANAL_LOG_DEV = canais_ids['CANAL_LOG_DEV']

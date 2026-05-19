@@ -210,10 +210,114 @@ class ExecucaoCog(commands.Cog):
                 pa.id, categoria.id, canal_texto.id, canal_voz.id,
             )
 
+            # ──────────────────────────────────────────────────────
+            # 8. LIMPEZA: remover canal de listagem + canal de negociação
+            # Feito APÓS toda a categoria ativa estar pronta.
+            # ──────────────────────────────────────────────────────
+            await self._limpar_canais_anteriores(
+                guild=guild,
+                projeto=projeto,
+                candidatura=candidatura,
+            )
+
         except discord.Forbidden:
             logger.error('Sem permissão para criar categoria/canais para projeto %s', projeto.id)
         except Exception as e:
             logger.exception('Erro ao criar projeto ativo: %s', e)
+
+    async def _limpar_canais_anteriores(
+        self,
+        guild: discord.Guild,
+        projeto,
+        candidatura: Candidatura,
+    ):
+        """
+        Apaga o canal de listagem (vitrine de projetos) e o canal de
+        negociação após a parceria ser fechada.
+        """
+        import asyncio
+        await asyncio.sleep(3)  # pequena pausa para garantir embeds carregadas
+
+        # 1. Deletar canal de listagem (vitrine de projetos disponíveis)
+        canal_listagem_id = getattr(projeto, 'canal_listagem_id', 0)
+        if canal_listagem_id:
+            canal_listagem = guild.get_channel(canal_listagem_id)
+            if canal_listagem and isinstance(canal_listagem, discord.TextChannel):
+                try:
+                    await canal_listagem.delete(
+                        reason=f'Parceria fechada — projeto "{projeto.titulo}" removido da vitrine'
+                    )
+                    logger.info(
+                        'Canal de listagem %d deletado (projeto %s)',
+                        canal_listagem_id, projeto.id,
+                    )
+                except discord.Forbidden:
+                    logger.error(
+                        'Sem permissão para deletar canal de listagem %d', canal_listagem_id
+                    )
+                except Exception as e:
+                    logger.error('Erro ao deletar canal de listagem: %s', e)
+            else:
+                logger.warning(
+                    'Canal de listagem %d não encontrado ou já deletado', canal_listagem_id
+                )
+        else:
+            logger.info(
+                'Projeto %s não tem canal_listagem_id salvo — pulando limpeza da vitrine',
+                projeto.id,
+            )
+
+        # 2. Cancelar e deletar TODAS as negociações do projeto (não só a fechada)
+        from core.database import listar_candidaturas_projeto, atualizar_candidatura
+        todas_candidaturas = listar_candidaturas_projeto(projeto.id)
+
+        for cand in todas_candidaturas:
+            # Cancelar candidaturas que não são a fechada
+            if cand.id != candidatura.id and cand.status == 'negociando':
+                cand.status = 'cancelado'
+                atualizar_candidatura(cand)
+                logger.info(
+                    'Candidatura %s cancelada automaticamente (parceria fechada com outro dev)',
+                    cand.id,
+                )
+
+                # Notificar o dev que perdeu a vaga
+                try:
+                    dev_perdeu = guild.get_member(cand.dev_id)
+                    if dev_perdeu:
+                        await dev_perdeu.send(
+                            f'❌ A negociação para o projeto **"{projeto.titulo}"** foi encerrada '
+                            f'porque o empregador fechou parceria com outro desenvolvedor.\n'
+                            f'Fique de olho nos próximos projetos!'
+                        )
+                except Exception:
+                    pass  # DM bloqueada
+
+            # Deletar o canal de negociação (de TODAS as candidaturas)
+            canal_neg_id = cand.thread_id
+            if canal_neg_id:
+                canal_neg = guild.get_channel(canal_neg_id)
+                if canal_neg:
+                    try:
+                        if isinstance(canal_neg, discord.Thread):
+                            await canal_neg.edit(archived=True, locked=True)
+                            logger.info(
+                                'Thread de negociação %d arquivada (cand %s)',
+                                canal_neg_id, cand.id,
+                            )
+                        elif isinstance(canal_neg, discord.TextChannel):
+                            await canal_neg.delete(
+                                reason=f'Parceria fechada para "{projeto.titulo}" — negociação encerrada'
+                            )
+                            logger.info(
+                                'Canal de negociação %d deletado (cand %s)',
+                                canal_neg_id, cand.id,
+                            )
+                    except discord.Forbidden:
+                        logger.error('Sem permissão para deletar canal de negociação %d', canal_neg_id)
+                    except Exception as e:
+                        logger.error('Erro ao deletar canal de negociação: %s', e)
+                    await asyncio.sleep(0.5)  # evitar rate limit
 
     @app_commands.command(
         name='meus_projetos',

@@ -10,6 +10,7 @@ from config.settings import (
     COR_PRINCIPAL, COR_SUCESSO, COR_ALERTA, COR_ERRO,
     CARGO_EMPREGADOR_VERIFICADO, CATEGORIA_PROJETOS_ID,
     CATEGORIAS_PROJETO, LINGUAGENS_OPCOES,
+    VALOR_MINIMO_PROJETO,
 )
 from services.api_client import validar_empregador_via_api
 from embeds.empregador_embed import criar_embed_projeto_aprovado, criar_embed_projeto_reprovado
@@ -117,6 +118,7 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
         )
         await interaction.response.send_message(embed=embed_proc)
 
+        projeto_aprovado = False
         try:
             # ==== MODO DE TESTE ====
             # Se o usuário digitar "TESTE" no título, aprova automaticamente
@@ -156,10 +158,10 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
             )
 
             # Validar valor do projeto antes de enviar à API
-            if valor < 20 or valor > 50000:
+            if valor < VALOR_MINIMO_PROJETO:
                 embed_valor = discord.Embed(
                     title='❌ Valor Inválido',
-                    description='O orçamento do projeto deve estar entre **R$ 20,00** e **R$ 50.000,00** para manter o padrão da plataforma.',
+                    description=f'O orçamento do projeto deve ser maior ou igual a **R$ {VALOR_MINIMO_PROJETO:.2f}** para manter o padrão da plataforma.',
                     color=COR_ERRO
                 )
                 await self.thread.send(embed=embed_valor)
@@ -187,6 +189,15 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
                     valor=valor,
                     prazo=prazo,
                 )
+                projeto_aprovado = True
+
+                # Apagar o tópico de validação com aprovação normal após 5 segundos
+                import asyncio
+                await asyncio.sleep(5)
+                try:
+                    await self.thread.delete()
+                except Exception:
+                    pass
             else:
                 # Salvar projeto como pendente para aprovação manual
                 projeto_pendente = Projeto(
@@ -250,13 +261,14 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
 
         except Exception as e:
             logger.exception('Erro ao validar projeto de %s: %s', user.name, e)
-            await self.thread.send(
-                embed=discord.Embed(
-                    title='❌  Erro na Validação',
-                    description='Ocorreu um erro ao validar o projeto. A staff foi notificada.',
-                    color=COR_ERRO,
+            if not projeto_aprovado:
+                await self.thread.send(
+                    embed=discord.Embed(
+                        title='❌  Erro na Validação',
+                        description='Ocorreu um erro ao validar o projeto. A staff foi notificada.',
+                        color=COR_ERRO,
+                    )
                 )
-            )
 
     def _validacao_local_fallback(self, linguagens: list, valor: float, descricao: str) -> dict:
         """Validação local quando a API está offline."""
@@ -343,73 +355,81 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
         await self.thread.send(embed=embed)
 
         # Publicar como um NOVO CANAL na categoria
-        from config.settings import CATEGORIA_PROJETOS_ID
-        categoria_projetos = guild.get_channel(CATEGORIA_PROJETOS_ID)
-        
-        if categoria_projetos and isinstance(categoria_projetos, discord.CategoryChannel):
-            import re
-            nome_canal = f"{self.categoria[:10].lower()}-{self.titulo_projeto.value[:15].lower().replace(' ', '-')}"
-            nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal)
+        try:
+            from config.settings import CATEGORIA_PROJETOS_ID
+            categoria_projetos = guild.get_channel(CATEGORIA_PROJETOS_ID)
             
-            try:
-                canal_projeto = await guild.create_text_channel(nome_canal, category=categoria_projetos)
+            if categoria_projetos and isinstance(categoria_projetos, discord.CategoryChannel):
+                import re
+                nome_canal = f"{self.categoria[:10].lower()}-{self.titulo_projeto.value[:15].lower().replace(' ', '-') }"
+                nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal)
                 
-                from dataclasses import asdict
-                embed_listagem = criar_embed_projeto_listagem(asdict(projeto))
-                view = ProjetoInteresseView(projeto_id=projeto.id)
-                
-                # Pings de stack
-                pings = []
-                from config.settings import CARGOS_LINGUAGEM
-                for lang in linguagens:
-                    if lang in CARGOS_LINGUAGEM:
-                        cargo_lang = guild.get_role(CARGOS_LINGUAGEM[lang])
-                        if cargo_lang:
-                            pings.append(cargo_lang.mention)
-                
-                content_msg = ""
-                if pings:
-                    content_msg = f"{' '.join(pings)} 🚀 Novo projeto postado buscando a stack: **{', '.join(linguagens)}**!"
-                else:
-                    from config.settings import CARGO_DEV_VERIFICADO
-                    if CARGO_DEV_VERIFICADO:
-                        cargo_dev = guild.get_role(CARGO_DEV_VERIFICADO)
-                        if cargo_dev:
-                            content_msg = f"{cargo_dev.mention} 🚀 Novo projeto postado buscando a stack: **{', '.join(linguagens)}**!"
+                try:
+                    canal_projeto = await guild.create_text_channel(nome_canal, category=categoria_projetos)
+                    
+                    from dataclasses import asdict
+                    embed_listagem = criar_embed_projeto_listagem(asdict(projeto))
+                    view = ProjetoInteresseView(projeto_id=projeto.id)
+                    
+                    # Pings de stack
+                    pings = []
+                    from config.settings import CARGOS_LINGUAGEM
+                    for lang in linguagens:
+                        if lang in CARGOS_LINGUAGEM:
+                            cargo_lang = guild.get_role(CARGOS_LINGUAGEM[lang])
+                            if cargo_lang:
+                                pings.append(cargo_lang.mention)
+                    
+                    content_msg = ""
+                    if pings:
+                        content_msg = f"{' '.join(pings)} 🚀 Novo projeto postado buscando a stack: **{', '.join(linguagens)}**!"
+                    else:
+                        from config.settings import CARGO_DEV_VERIFICADO
+                        if CARGO_DEV_VERIFICADO:
+                            cargo_dev = guild.get_role(CARGO_DEV_VERIFICADO)
+                            if cargo_dev:
+                                content_msg = f"{cargo_dev.mention} 🚀 Novo projeto postado buscando a stack: **{', '.join(linguagens)}**!"
                         
-                msg = await canal_projeto.send(content=content_msg, embed=embed_listagem, view=view)
-                
-                # Salvar message_id para referência futura
-                projeto.message_id = msg.id
-                salvar_projeto(projeto)
-                
-                # Disparar DM para os Devs que têm a stack (Mesclagem)
-                from core.database import db
-                devs = db.get('devs', {})
-                for dev_id, dev_data in devs.items():
-                    dev_langs = set(dev_data.get('linguagens_confirmadas', []))
-                    proj_langs = set(linguagens)
-                    match = dev_langs.intersection(proj_langs)
-                    if match:
-                        membro_dev = guild.get_member(int(dev_id))
-                        if membro_dev:
-                            try:
-                                link_msg = msg.jump_url
-                                await membro_dev.send(
-                                    f"🚀 **Match de Projeto!**\n\nUm novo projeto que precisa de **{', '.join(match)}** "
-                                    f"foi postado!\nCorre no canal {canal_projeto.mention} para clicar em **Tenho Interesse**.\n\n🔗 Link direto: {link_msg}"
-                                )
-                                logger.info("Notificação DM enviada para o dev %s sobre o projeto %s", membro_dev.name, projeto.id)
-                            except Exception:
-                                pass
-            except discord.Forbidden:
-                await self.thread.send('⚠️ O bot não tem permissão para criar canais na categoria de projetos.')
-        else:
-            await self.thread.send(
-                '⚠️ Categoria de projetos não configurada ou não encontrada. '
-                'O projeto foi salvo mas não foi publicado automaticamente.'
-            )
-
+                    msg = await canal_projeto.send(content=content_msg, embed=embed_listagem, view=view)
+                    
+                    # Salvar message_id e canal_listagem_id para referência futura
+                    projeto.message_id = msg.id
+                    projeto.canal_listagem_id = canal_projeto.id
+                    salvar_projeto(projeto)
+                    
+                    # Disparar DM para os Devs que têm a stack (Mesclagem)
+                    from core.database import listar_devs
+                    devs = listar_devs()
+                    for dev in devs:
+                        dev_langs = set(dev.linguagens_confirmadas or [])
+                        proj_langs = set(linguagens)
+                        match = dev_langs.intersection(proj_langs)
+                        if match:
+                            membro_dev = guild.get_member(dev.user_id)
+                            if not membro_dev:
+                                try:
+                                    membro_dev = await guild.fetch_member(dev.user_id)
+                                except Exception:
+                                    membro_dev = None
+                            if membro_dev:
+                                try:
+                                    link_msg = msg.jump_url
+                                    await membro_dev.send(
+                                        f"🚀 **Match de Projeto!**\n\nUm novo projeto que precisa de **{', '.join(match)}** "
+                                        f"foi postado!\nCorre no canal {canal_projeto.mention} para clicar em **Tenho Interesse**.\n\n🔗 Link direto: {link_msg}"
+                                    )
+                                    logger.info("Notificação DM enviada para o dev %s sobre o projeto %s", membro_dev.name, projeto.id)
+                                except Exception:
+                                    pass
+                except discord.Forbidden:
+                    logger.warning('Sem permissão para criar canal do projeto na categoria de projetos.')
+            else:
+                logger.warning(
+                    'Categoria de projetos não configurada ou não encontrada. '
+                    'O projeto foi salvo mas não foi publicado automaticamente.'
+                )
+        except Exception as e:
+            logger.exception('Falha ao publicar projeto automaticamente: %s', e)
         logger.info(
             'Projeto "%s" de %s APROVADO e listado | id=%s | valor=%.2f',
             self.titulo_projeto.value, user.name, projeto.id, valor,

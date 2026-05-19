@@ -1,7 +1,7 @@
 import logging
 import discord
 from discord.ui import View, Select
-from config.settings import OPCOES_EXPERIENCIA, COR_PRINCIPAL, COR_ERRO, MSG_REPROVADO_EXPERIENCIA, MSG_REPROVADO_AUTO, MSG_REVIEW, COR_ALERTA, COR_SUCESSO
+from config.settings import OPCOES_EXPERIENCIA, COR_PRINCIPAL, COR_ERRO, MSG_REPROVADO_EXPERIENCIA, MSG_REPROVADO_AUTO, MSG_REVIEW, COR_ALERTA, COR_SUCESSO, CARGO_DEV_VERIFICADO
 from utils.helpers import enviar_msg_erro_api
 from embeds.verificacao_embed import criar_embed_resultado_dev, criar_embed_aprovado
 from embeds.review_embed import criar_embed_review
@@ -28,6 +28,19 @@ class SelecaoExperienciaView(View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message('❌ Apenas o usuário em verificação pode interagir.', ephemeral=True)
             return
+
+        # Verificar se já tem o cargo de dev verificado
+        from config.settings import get_cargo_dev_verificado
+        cargo_dev = get_cargo_dev_verificado(interaction.guild)
+        if cargo_dev and cargo_dev in interaction.user.roles:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except Exception:
+                pass
+            await interaction.response.send_message('✅ Você já é um desenvolvedor verificado.', ephemeral=True)
+            return
             
         experiencia = interaction.data['values'][0]
         
@@ -45,7 +58,7 @@ class SelecaoExperienciaView(View):
             )
             embed.set_footer(text='Você pode tentar novamente quando tiver 1 ano de experiência.')
             await self.thread.send(embed=embed)
-            await _arquivar_thread(self.thread)
+            await _apagar_thread(self.thread, delay=5)
             logger.info('Usuário %s reprovado por experiência insuficiente', interaction.user.name)
             return
             
@@ -53,10 +66,17 @@ class SelecaoExperienciaView(View):
         
         user = interaction.user
         guild = interaction.guild
-        
         github_url = self.github.strip()
         linkedin_url = self.linkedin.strip() if self.linkedin else ''
         descricao_txt = self.descricao.strip()
+
+        logger.info('=== INICIANDO SUBMIT VERIFICAÇÃO DEV ===')
+        logger.info('Usuário: %s (%s)', user.name, user.id)
+        logger.info('GitHub: %s', github_url)
+        logger.info('LinkedIn: %s', linkedin_url)
+        logger.info('Experiência: %s', experiencia)
+        logger.info('Linguagens: %s', self.linguagens)
+        logger.info('Descrição: %s', descricao_txt[:100] + '...' if len(descricao_txt) > 100 else descricao_txt)
 
         # SIMULAÇÃO LOCAL (FORÇADA) SE FOR "TESTE"
         if github_url.upper() == "TESTE":
@@ -70,7 +90,7 @@ class SelecaoExperienciaView(View):
                 senioridade=experiencia,
                 motivos_reprovacao=[], penalizacoes=[], detalhes_compat=[]
             )
-            await self._aprovar_dev(guild, user, resultado, github_url, linkedin_url)
+            await self._aprovar_dev(guild, user, resultado, github_url, linkedin_url, experiencia)
             return
 
         resultado_api = await validar_dev_via_api(
@@ -101,24 +121,75 @@ class SelecaoExperienciaView(View):
         )
 
         if resultado.aprovado:
+            logger.info('✅ RESULTADO APROVADO - Chamando _aprovar_dev')
             await self._aprovar_dev(guild, user, resultado, github_url, linkedin_url, experiencia)
         elif resultado.requires_review:
+            logger.info('⚠️ RESULTADO REQUIRES REVIEW - Chamando _enviar_review')
             await self._enviar_review(guild, user, resultado, github_url, linkedin_url, experiencia)
         else:
+            logger.info('❌ RESULTADO REPROVADO - Chamando _reprovar_dev')
             await self._reprovar_dev(user, resultado)
 
+    def _get_cargo_dev(self, guild: discord.Guild) -> discord.Role | None:
+        from config.settings import get_cargo_dev_verificado, DEV_ROLE_NAME, CARGO_DEV_VERIFICADO
+
+        cargo = get_cargo_dev_verificado(guild)
+        if cargo:
+            logger.info('Cargo Dev Verificado encontrado: %s (ID: %s)', cargo.name, cargo.id)
+            return cargo
+
+        logger.error('Cargo "%s" não encontrado no servidor %s via nome ou ID %s', DEV_ROLE_NAME, guild.name, CARGO_DEV_VERIFICADO)
+        logger.info('Cargos disponíveis no servidor %s:', guild.name)
+        for role in guild.roles[:20]:
+            logger.info('  - %s (ID: %s)', role.name, role.id)
+        return None
+
     async def _aprovar_dev(self, guild: discord.Guild, user: discord.Member, resultado, github_url: str, linkedin_url: str, experiencia: str):
-        from config.settings import CARGO_DEV_VERIFICADO, CARGOS_LINGUAGEM
+        logger.info('=== INICIANDO APROVAÇÃO DEV ===')
+        logger.info('Usuário: %s (%s)', user.name, user.id)
+        logger.info('Guild: %s (%s)', guild.name, guild.id)
+        logger.info('Resultado aprovado: %s', resultado.aprovado)
+        logger.info('Linguagens confirmadas: %s', resultado.linguagens_confirmadas)
+        logger.info('Experiência: %s', experiencia)
+
+        from config.settings import CARGOS_LINGUAGEM, CARGOS_EXPERIENCIA
         from core.database import DevVerificado, salvar_dev
         
         # Cargo geral
-        cargo = guild.get_role(CARGO_DEV_VERIFICADO)
+        cargo = self._get_cargo_dev(guild)
+        cargo_assigned = False
         if cargo:
-            try:
-                await user.add_roles(cargo, reason='Aprovado na verificação Dev')
-            except discord.Forbidden:
-                logger.error('Sem permissão para adicionar cargo %s', CARGO_DEV_VERIFICADO)
-                
+            bot_member = guild.me
+            bot_role_name = bot_member.top_role.name if bot_member else 'UNKNOWN'
+            bot_role_position = bot_member.top_role.position if bot_member else -1
+            logger.info('Tentando atribuir cargo: %s (%s) ao usuário %s (%s)', cargo.name, cargo.id, user.name, user.id)
+            logger.info('Bot top role: %s (posição %s)', bot_role_name, bot_role_position)
+            logger.info('Cargo alvo posição: %s', cargo.position)
+
+            # Verificar se o bot tem permissão para gerenciar roles
+            if not bot_member:
+                logger.error('Não foi possível determinar o membro do bot no servidor %s', guild.name)
+            elif not bot_member.guild_permissions.manage_roles:
+                logger.error('Bot não tem permissão para gerenciar roles no servidor %s', guild.name)
+            elif cargo.position >= bot_member.top_role.position:
+                logger.error('Cargo %s está acima do cargo mais alto do bot (%s)', cargo.name, bot_member.top_role.name)
+            else:
+                try:
+                    await user.add_roles(cargo, reason='Aprovado na verificação Dev')
+                    cargo_assigned = True
+                    logger.info('✅ Cargo %s atribuído com sucesso ao usuário %s', cargo.name, user.name)
+                except discord.Forbidden:
+                    logger.error('❌ Sem permissão para adicionar cargo %s ao usuário %s', cargo.id, user.id)
+                except Exception as e:
+                    logger.error('❌ Erro ao atribuir cargo Dev Verificado a %s: %s', user.id, e)
+        else:
+            logger.error('❌ Cargo de Dev Verificado não encontrado')
+
+        if not cargo_assigned:
+            await self.thread.send(
+                '⚠️ Não foi possível atribuir o cargo **Desenvolvedor Verificado**. Verifique se eu tenho permissão **Manage Roles** e se meu cargo está acima de **Desenvolvedor Verificado** na hierarquia.'
+            )
+
         # Cargos específicos das linguagens
         for lang in resultado.linguagens_confirmadas:
             if lang in CARGOS_LINGUAGEM:
@@ -130,11 +201,22 @@ class SelecaoExperienciaView(View):
                     except discord.Forbidden:
                         pass
         
+        # Cargo de experiência
+        if experiencia in CARGOS_EXPERIENCIA:
+            cargo_exp_id = CARGOS_EXPERIENCIA[experiencia]
+            cargo_exp = guild.get_role(cargo_exp_id)
+            if cargo_exp:
+                try:
+                    await user.add_roles(cargo_exp, reason=f'Experiência: {experiencia}')
+                except discord.Forbidden:
+                    logger.error('Sem permissão para adicionar cargo de experiência %s', cargo_exp_id)
+        
         embed_thread = criar_embed_resultado_dev(resultado)
         await self.thread.send(embed=embed_thread)
         
         embed_aprovado = criar_embed_aprovado(user)
         embed_aprovado.add_field(name='Suas Linguagens', value=', '.join(resultado.linguagens_confirmadas), inline=False)
+        embed_aprovado.add_field(name='Experiência', value=experiencia.replace('_', ' ').title(), inline=True)
         await self.thread.send(content=f'||{user.mention}||', embed=embed_aprovado)
         
         # Envia também um log (se quiser manter um histórico)
@@ -163,6 +245,7 @@ class SelecaoExperienciaView(View):
         )
         salvar_dev(dev_salvo)
         logger.info('Usuário %s (%s) APROVADO automaticamente', user.name, user.id)
+        await _apagar_thread(self.thread, delay=5)
 
     async def _reprovar_dev(self, user: discord.Member, resultado):
         embed = discord.Embed(title='❌  Verificação Reprovada', description=MSG_REPROVADO_AUTO, color=COR_ERRO)
@@ -171,13 +254,7 @@ class SelecaoExperienciaView(View):
         embed.set_footer(text='Você pode tentar novamente em 30 dias. Este chat será apagado em 20 segundos.')
         await self.thread.send(embed=embed)
         logger.info('Usuário %s (%s) REPROVADO automaticamente', user.name, user.id)
-        
-        import asyncio
-        await asyncio.sleep(20)
-        try:
-            await self.thread.delete()
-        except:
-            pass
+        await _apagar_thread(self.thread, delay=5)
 
     async def _enviar_review(self, guild: discord.Guild, user: discord.Member, resultado, github_url: str, linkedin_url: str, experiencia: str):
         embed_thread = discord.Embed(title='📋  Enviado para Revisão', description=MSG_REVIEW, color=COR_ALERTA)
@@ -218,6 +295,21 @@ async def _arquivar_thread(channel):
             await channel.edit(archived=True, locked=True)
     except Exception as e:
         logger.error('Erro ao arquivar thread: %s', e)
+
+async def _apagar_thread(channel, delay: int = 5):
+    import asyncio
+    await asyncio.sleep(delay)
+    try:
+        if isinstance(channel, discord.Thread) or isinstance(channel, discord.TextChannel):
+            await channel.delete(reason='Verificação concluída')
+            return
+    except Exception as e:
+        logger.error('Erro ao apagar thread: %s', e)
+    try:
+        if isinstance(channel, discord.Thread):
+            await channel.edit(archived=True, locked=True, reason='Falha ao apagar thread')
+    except Exception as e:
+        logger.error('Erro ao arquivar thread como fallback: %s', e)
 
 def _emoji_experiencia(valor: str) -> str:
     emojis = {'6_meses': '🌱', '1_ano': '📗', '2_anos': '📘', '4_6_anos': '📙', '6_mais': '📕'}

@@ -28,9 +28,18 @@ EXPERIENCIA_DEV_NIVEL = {
 }
 
 
-def verificar_compatibilidade_dev_projeto(dev: DevVerificado, projeto: Projeto) -> dict:
+def verificar_compatibilidade_dev_projeto(
+    dev: DevVerificado,
+    projeto: Projeto,
+    min_stack_matches: int = 2,
+) -> dict:
     """
     Verifica se um dev é compatível com um projeto.
+
+    Args:
+        dev: Dev verificado.
+        projeto: Projeto aberto.
+        min_stack_matches: número mínimo de linguagens compatíveis necessário.
 
     Retorna:
         {
@@ -63,11 +72,11 @@ def verificar_compatibilidade_dev_projeto(dev: DevVerificado, projeto: Projeto) 
     resultado['linguagens_match'] = sorted(match)
     resultado['linguagens_faltando'] = sorted(faltando)
 
-    if len(match) < 2:
+    if len(match) < min_stack_matches:
         resultado['motivos_rejeicao'].append(
             f'Você tem apenas {len(match)} linguagem(s) compatível(is) '
-            f'com o projeto (mínimo: 2). '
-            f'Requeridas: {", ".join(langs_projeto)}'
+            f'com o projeto (mínimo: {min_stack_matches}). '
+            f'Requeridas: {", ".join(sorted(langs_projeto))}'
         )
     else:
         resultado['score_match'] += 40

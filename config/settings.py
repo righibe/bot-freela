@@ -3,13 +3,17 @@ Configurações centrais do sistema Freeela.
 Contém IDs de canais, cargos, constantes de validação e mensagens.
 """
 
+import discord
+
 # ══════════════════════════════════════════════════════
 #  CANAIS
 # ══════════════════════════════════════════════════════
 CANAL_VERIFICAR_DEV = 1495614476060459040
-CANAL_VERIFICAR_EMPREGADOR = 1495616185767559360          # Atualizar com o ID real
+CANAL_VERIFICAR_EMPREGADOR = 1503840999615758386          # Atualizar com o ID real
+CANAL_ATUALIZAR_PERFIL_DEV = 1502790582370566186                            # Atualizar com o ID real
 CATEGORIA_PROJETOS_ID = 1500684318412898427               # Atualizar com o ID real
 CATEGORIA_NEGOCIACAO_ID = 1500684319646027858                               # Atualizar com o ID real
+CATEGORIA_VERIFICACAO_ID = 1495614476060459038            # Categoria de verificação
 CANAL_LOG_DEV = 1497289159344128081                       # Atualizar com o ID real
 CANAL_LOG_PROJETOS = 1500684578291978240                  # Atualizar com o ID real
 
@@ -19,6 +23,31 @@ CANAL_LOG_PROJETOS = 1500684578291978240                  # Atualizar com o ID r
 CARGO_DEV_VERIFICADO = 1500684314999001108
 CARGO_EMPREGADOR_VERIFICADO = 1500684315896320012         # Atualizar com o ID real
 CARGO_STAFF = 1500684317305868451                         # Atualizar com o ID real
+DEV_ROLE_NAME = 'Desenvolvedor Verificado'
+
+# Função de normalização para melhorar a busca por nome de cargo
+def _normalize_role_name(name: str) -> str:
+    return ''.join(ch for ch in name.lower() if ch.isalnum() or ch.isspace()).strip()
+
+# Busca o cargo Dev Verificado pelo ID ou pelo nome
+def get_cargo_dev_verificado(guild: discord.Guild) -> discord.Role | None:
+    """Busca o cargo 'Desenvolvedor Verificado' pelo ID ou pelo nome no servidor."""
+    if CARGO_DEV_VERIFICADO:
+        cargo = guild.get_role(CARGO_DEV_VERIFICADO)
+        if cargo:
+            return cargo
+
+    target_name = _normalize_role_name(DEV_ROLE_NAME)
+    for role in guild.roles:
+        if _normalize_role_name(role.name) == target_name:
+            return role
+
+    for role in guild.roles:
+        normalized = _normalize_role_name(role.name)
+        if target_name in normalized or normalized in target_name:
+            return role
+
+    return None
 
 CARGOS_LINGUAGEM = {
     'Java': 1495848927008915801,
@@ -30,6 +59,13 @@ CARGOS_LINGUAGEM = {
     'C/C++': 1495849467335938211,
     'Swift': 1495849566140891256,
     'Ruby': 1495849647028179105,
+}
+
+CARGOS_EXPERIENCIA = {
+    '1_ano': 1501265353068642424,
+    '2_anos': 1501265823585665036,
+    '4_6_anos': 1501265913117147297,
+    '6_mais': 1501266107213021235,
 }
 
 # ══════════════════════════════════════════════════════

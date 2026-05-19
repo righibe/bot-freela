@@ -69,6 +69,20 @@ async def validate_dev(req: DevValidationRequest) -> DevValidationResponse:
     if not github_profile.existe:
         response.rejection_reasons.append('Perfil GitHub não encontrado ou privado.')
     else:
+        # Verificar idade da conta GitHub versus experiência declarada
+        experiencia_map = {
+            '1_ano': 1,
+            '2_anos': 2,
+            '4_6_anos': 4,
+            '6_mais': 6,
+        }
+        experiencia_anos = experiencia_map.get(req.experiencia)
+        if experiencia_anos is not None and github_profile.idade_conta_anos is not None:
+            if github_profile.idade_conta_anos + 1 < experiencia_anos:
+                response.rejection_reasons.append(
+                    f'Conta GitHub com {github_profile.idade_conta_anos} anos não sustenta a experiência declarada ({req.experiencia}).'
+                )
+
         # Verificar repos públicos (esperado ter repos para justificar experiência)
         if github_profile.repos_publicos == 0:
             response.rejection_reasons.append('Nenhum repositório público no GitHub.')

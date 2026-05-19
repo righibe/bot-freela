@@ -71,6 +71,7 @@ class Projeto:
     status: str = 'aberto'       # aberto, em_negociacao, em_andamento, concluido, cancelado
     data_criacao: str = ''
     message_id: int = 0          # ID da mensagem do embed no canal de listagem
+    canal_listagem_id: int = 0   # ID do canal Discord onde o projeto foi publicado
     candidatos: list[int] = field(default_factory=list)
 
 
@@ -309,6 +310,15 @@ def atualizar_candidatura(cand: Candidatura) -> None:
             dados[i] = asdict(cand)
             break
     _salvar_json(CANDIDATURAS_FILE, dados)
+
+
+def listar_candidaturas_projeto(projeto_id: str) -> list[Candidatura]:
+    """Lista todas as candidaturas de um projeto."""
+    dados = _carregar_json(CANDIDATURAS_FILE)
+    return [
+        Candidatura(**d) for d in dados
+        if d.get('projeto_id') == projeto_id
+    ]
 
 
 def contar_candidaturas_dev_hoje(dev_id: int) -> int:

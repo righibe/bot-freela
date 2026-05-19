@@ -10,6 +10,7 @@ from config.settings import COR_SUCESSO, COR_ERRO, COR_ALERTA, COR_EXECUCAO, CAN
 from core.database import (
     buscar_projeto_ativo_por_canal, atualizar_projeto_ativo,
     atualizar_projetos_ativos_dev, buscar_projeto, atualizar_status_projeto,
+    salvar_projeto,
 )
 from embeds.execucao_embed import (
     criar_embed_projeto_concluido, criar_embed_alerta_dados_faltando,
@@ -135,10 +136,13 @@ class ExecucaoProjetoView(View):
         # Log
         await self._enviar_log(interaction.guild, pa, 'concluido', titulo)
 
+        # Remover do canal de projetos disponíveis e deletar canal de negociação
+        await self._limpar_projeto(interaction.guild, pa, projeto)
+
         logger.info('Projeto %s concluído por %s', pa.id, interaction.user.name)
 
     async def callback_cancelar(self, interaction: discord.Interaction):
-        """Cancela o projeto."""
+        """Cancela o projeto ativo e republica na vitrine de projetos disponíveis."""
         pa = buscar_projeto_ativo_por_canal(interaction.channel.id)
         if not pa:
             await interaction.response.send_message(
@@ -154,27 +158,46 @@ class ExecucaoProjetoView(View):
             )
             return
 
+        # Marcar projeto ativo como cancelado
         pa.status = 'cancelado'
         atualizar_projeto_ativo(pa)
         atualizar_projetos_ativos_dev(pa.dev_id, -1)
-        atualizar_status_projeto(pa.projeto_id, 'cancelado')
+
+        # Voltar status do projeto original para 'aberto'
+        atualizar_status_projeto(pa.projeto_id, 'aberto')
 
         projeto = buscar_projeto(pa.projeto_id)
         titulo = projeto.titulo if projeto else 'Projeto'
 
         embed = discord.Embed(
-            title='❌  Projeto Cancelado',
+            title='❌  Parceria Cancelada',
             description=(
-                f'O projeto **{titulo}** foi cancelado por '
+                f'A parceria do projeto **{titulo}** foi cancelada por '
                 f'**{interaction.user.display_name}**.\n\n'
+                f'O projeto será republicado em **Projetos Disponíveis** '
+                f'para que outros desenvolvedores possam se candidatar.\n\n'
                 f'Se houver disputa, acione a staff.'
             ),
             color=COR_ERRO,
         )
         await interaction.response.send_message(embed=embed)
 
-        await self._enviar_log(interaction.guild, pa, 'cancelado', titulo)
-        logger.info('Projeto %s cancelado por %s', pa.id, interaction.user.name)
+        await self._enviar_log(interaction.guild, pa, 'cancelado → reaberto', titulo)
+
+        # Limpar candidatos anteriores para permitir novas candidaturas
+        if projeto:
+            projeto.candidatos = []
+            projeto.status = 'aberto'
+            salvar_projeto(projeto)
+
+        # Republicar na vitrine de projetos disponíveis
+        guild = interaction.guild
+        await self._republicar_projeto_na_vitrine(guild, projeto)
+
+        # Deletar a categoria do projeto ativo (canais texto + voz)
+        await self._deletar_categoria_ativa(guild, pa)
+
+        logger.info('Projeto %s cancelado e republicado por %s', pa.id, interaction.user.name)
 
     async def callback_staff(self, interaction: discord.Interaction):
         """Aciona a staff para intervenção."""
@@ -199,6 +222,80 @@ class ExecucaoProjetoView(View):
         )
         await interaction.response.send_message(embed=embed)
         logger.warning('Staff acionada no projeto %s por %s', pa.id, interaction.user.name)
+
+    async def _limpar_projeto(self, guild: discord.Guild, pa, projeto):
+        """Remove o projeto dos canais quando concluído ou cancelado.
+        
+        - Deleta o canal inteiro da vitrine de projetos disponíveis
+        - Deleta TODOS os canais da categoria do projeto ativo (texto + voz)
+        - Deleta a categoria do projeto ativo
+        """
+        import asyncio
+
+        # 1. Deletar o canal de listagem da vitrine de projetos disponíveis
+        canal_listagem_id = getattr(projeto, 'canal_listagem_id', 0) if projeto else 0
+        if canal_listagem_id:
+            canal_listagem = guild.get_channel(canal_listagem_id)
+            if canal_listagem and isinstance(canal_listagem, discord.TextChannel):
+                try:
+                    await canal_listagem.delete(
+                        reason=f'Projeto {pa.projeto_id} concluído/cancelado — removido da vitrine'
+                    )
+                    logger.info(
+                        'Canal de listagem %d deletado (projeto %s)',
+                        canal_listagem_id, pa.projeto_id,
+                    )
+                except discord.Forbidden:
+                    logger.error('Sem permissão para deletar canal de listagem %d', canal_listagem_id)
+                except Exception as e:
+                    logger.error('Erro ao deletar canal de listagem: %s', e)
+            else:
+                logger.warning('Canal de listagem %d não encontrado ou já deletado', canal_listagem_id)
+        else:
+            # Fallback: tentar deletar a mensagem se canal_listagem_id não existir
+            if projeto and projeto.message_id:
+                try:
+                    from config.settings import CATEGORIA_PROJETOS_ID
+                    categoria_projetos = guild.get_channel(CATEGORIA_PROJETOS_ID)
+                    if categoria_projetos and isinstance(categoria_projetos, discord.CategoryChannel):
+                        for canal in categoria_projetos.text_channels:
+                            try:
+                                msg = await canal.fetch_message(projeto.message_id)
+                                await msg.delete()
+                                logger.info('Mensagem do projeto %s deletada (fallback)', projeto.id)
+                                break
+                            except discord.NotFound:
+                                continue
+                            except Exception as e:
+                                logger.error('Erro ao deletar mensagem do projeto: %s', e)
+                except Exception as e:
+                    logger.error('Erro ao remover projeto de projetos disponíveis (fallback): %s', e)
+
+        # 2. Deletar a categoria INTEIRA do projeto ativo (todos os canais dentro)
+        if pa.categoria_id:
+            categoria = guild.get_channel(pa.categoria_id)
+            if categoria and isinstance(categoria, discord.CategoryChannel):
+                # Deletar todos os canais dentro da categoria primeiro
+                for canal in categoria.channels:
+                    try:
+                        await canal.delete(reason=f'Projeto {pa.projeto_id} concluído/cancelado')
+                        logger.info('Canal %s (%d) deletado da categoria do projeto', canal.name, canal.id)
+                    except discord.Forbidden:
+                        logger.error('Sem permissão para deletar canal %d', canal.id)
+                    except Exception as e:
+                        logger.error('Erro ao deletar canal %d: %s', canal.id, e)
+                    await asyncio.sleep(0.5)  # evitar rate limit
+
+                # Agora deletar a categoria vazia
+                try:
+                    await categoria.delete(reason=f'Projeto {pa.projeto_id} concluído/cancelado')
+                    logger.info('Categoria %d deletada (projeto %s)', pa.categoria_id, pa.projeto_id)
+                except discord.Forbidden:
+                    logger.error('Sem permissão para deletar categoria %d', pa.categoria_id)
+                except Exception as e:
+                    logger.error('Erro ao deletar categoria: %s', e)
+            else:
+                logger.warning('Categoria %d não encontrada ou já deletada', pa.categoria_id)
 
     async def _enviar_log(
         self,

@@ -45,3 +45,34 @@ def criar_embed_aprovado(user: discord.Member) -> discord.Embed:
     )
     embed.set_footer(text='Os seus cargos foram atribuídos automaticamente.')
     return embed
+
+
+def criar_embed_atualizar_perfil() -> discord.Embed:
+    """Embed para devs verificados atualizarem seu perfil."""
+    embed = discord.Embed(
+        title='🔄  Atualizar Seu Perfil',
+        description=(
+            'Você já é um **Desenvolvedor Verificado**! Mas se quiser adicionar novas linguagens, '
+            'atualizar sua experiência ou modificar sua descrição profissional, use o botão abaixo.\n\n'
+            '**Por que atualizar?**\n'
+            '• Adicionar novas linguagens e tecnologias\n'
+            '• Refletir aumento de experiência\n'
+            '• Melhorar seu perfil no servidor\n\n'
+            '⚠️ **Importante:** Sua atualização será validada novamente via GitHub e experiência será confirmada.'
+        ),
+        color=COR_PRINCIPAL
+    )
+    embed.add_field(
+        name='📋  Como funciona?',
+        value=(
+            '```\n'
+            '1️⃣ Clique no botão "Atualizar Perfil"\n'
+            '2️⃣ Forneça seu GitHub e descrição\n'
+            '3️⃣ Aguarde a validação automática\n'
+            '4️⃣ Seus cargos serão atualizados\n'
+            '```'
+        ),
+        inline=False
+    )
+    embed.set_footer(text='Freeela • Atualização de Perfil', icon_url='https://cdn.discordapp.com/embed/avatars/0.png')
+    return embed

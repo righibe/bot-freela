@@ -151,10 +151,27 @@ async def main():
     data_dir = Path(__file__).parent / 'data'
     data_dir.mkdir(exist_ok=True)
 
-    async with bot:
-        await carregar_cogs()
+    await carregar_cogs()
+
+    try:
         await bot.start(TOKEN)
+    except asyncio.CancelledError:
+        logger.info('Execução do bot cancelada.')
+    except KeyboardInterrupt:
+        logger.info('Bot interrompido manualmente pelo usuário.')
+    finally:
+        if not bot.is_closed():
+            await bot.close()
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:
+        logger.info('Aplicação cancelada.')
+    except KeyboardInterrupt:
+        logger.info('Execução interrompida pelo usuário.')
+    except Exception as e:
+        logger.exception('Erro fatal no bot: %s', e)
+    finally:
+        logger.info('Encerramento concluído.')

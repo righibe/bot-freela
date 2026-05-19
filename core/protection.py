@@ -13,7 +13,6 @@ from config.settings import (
     DESCRICAO_MINIMA_INTERESSE,
     DESCRICAO_MINIMA_PROJETO,
     VALOR_MINIMO_PROJETO,
-    VALOR_MAXIMO_PROJETO,
 )
 from core.database import (
     verificar_cooldown,
@@ -149,11 +148,6 @@ def validar_valor_projeto(valor: float) -> ProtecaoResultado:
     if valor < VALOR_MINIMO_PROJETO:
         resultado.bloquear(
             f'O valor mínimo para um projeto é **R$ {VALOR_MINIMO_PROJETO:.2f}**.'
-        )
-
-    if valor > VALOR_MAXIMO_PROJETO:
-        resultado.bloquear(
-            f'O valor máximo permitido é **R$ {VALOR_MAXIMO_PROJETO:.2f}**.'
         )
 
     return resultado

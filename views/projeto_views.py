@@ -1,6 +1,6 @@
 """
 Views para listagem de projetos.
-Botão "Tenho Interesse" com verificação de compatibilidade.
+Botão "Tenho Interesse" aberto para desenvolvedores verificados, sem bloquear por senioridade ou número de stacks.
 """
 
 import logging
@@ -12,7 +12,6 @@ from core.database import (
     buscar_projeto, buscar_dev, Candidatura, salvar_candidatura,
     adicionar_candidato_projeto, registrar_cooldown, _gerar_id,
 )
-from core.matching_engine import verificar_compatibilidade_dev_projeto
 from core.protection import verificar_candidatura_permitida
 from embeds.projeto_embed import criar_embed_interesse_enviado, criar_embed_negociacao
 
@@ -45,9 +44,15 @@ class ProjetoInteresseView(View):
         # 1. Verificar se é dev verificado
         dev = buscar_dev(user.id)
         if not dev:
-            from config.settings import CARGO_DEV_VERIFICADO, CARGOS_LINGUAGEM
-            cargo_dev = guild.get_role(CARGO_DEV_VERIFICADO)
+            from config.settings import get_cargo_dev_verificado, CARGOS_LINGUAGEM
+            cargo_dev = get_cargo_dev_verificado(guild)
             if cargo_dev and cargo_dev in user.roles:
+                from core.database import DevVerificado
+                linguagens_confirmadas = []
+                for lang, cargo_id in CARGOS_LINGUAGEM.items():
+                    cargo_lang = guild.get_role(cargo_id)
+                    if cargo_lang and cargo_lang in user.roles:
+                        linguagens_confirmadas.append(lang)
                 from core.database import DevVerificado
                 linguagens_confirmadas = []
                 for lang, cargo_id in CARGOS_LINGUAGEM.items():
@@ -120,17 +125,7 @@ class ProjetoInteresseView(View):
             )
             return
 
-        # 6. Verificar compatibilidade (REGRA CRÍTICA: 2+ linguagens)
-        compat = verificar_compatibilidade_dev_projeto(dev, projeto)
-        if not compat['compativel']:
-            motivos = '\n'.join(f'• {m}' for m in compat['motivos_rejeicao'])
-            await interaction.response.send_message(
-                f'❌ **Você não é compatível com este projeto:**\n{motivos}',
-                ephemeral=True,
-            )
-            return
-
-        # 7. Tudo OK — criar thread de negociação
+        # 6. Tudo OK — criar thread de negociação
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -152,10 +147,7 @@ class ProjetoInteresseView(View):
             nome_canal = f"negoc-{user.name}-{projeto.titulo[:10]}"
             nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal.lower())
 
-            # Definir permissões: Dev, Empregador e Staff podem ver
-            from config.settings import CARGO_STAFF
-            cargo_staff = guild.get_role(CARGO_STAFF)
-            
+            # Definir permissões: apenas Dev, Empregador e bot podem ver
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -163,8 +155,6 @@ class ProjetoInteresseView(View):
             }
             if empregador:
                 overwrites[empregador] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-            if cargo_staff:
-                overwrites[cargo_staff] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
             # Criar canal de texto na categoria
             thread = await guild.create_text_channel(
