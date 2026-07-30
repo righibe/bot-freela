@@ -53,13 +53,12 @@ class ProjetoDetalhesModal(Modal, title='📋 Definir Detalhes do Projeto'):
             )
             return
 
-        # Parse valor
-        valor_str = self.valor_final.value.replace('R$', '').replace('r$', '').replace('.', '').replace(',', '.').strip()
-        try:
-            valor = float(valor_str)
-        except ValueError:
+        # Parse valor (aceita 1500, 1500,00, 1.500,00, R$ 1500 etc.)
+        from utils.helpers import parse_valor_brl
+        valor = parse_valor_brl(self.valor_final.value)
+        if valor is None or valor <= 0:
             await interaction.response.send_message(
-                '❌ Valor inválido. Use apenas números.',
+                '❌ Valor inválido. Exemplos aceitos: `1500`, `1500,00`, `1.500,00`.',
                 ephemeral=True,
             )
             return
@@ -71,14 +70,19 @@ class ProjetoDetalhesModal(Modal, title='📋 Definir Detalhes do Projeto'):
         pa.regras_confirmadas = True
         atualizar_projeto_ativo(pa)
 
+        from utils.helpers import formatar_brl
         embed = discord.Embed(
             title='✅  Detalhes do Projeto Definidos',
-            description='Os detalhes obrigatórios foram registrados com sucesso.',
+            description=(
+                'Os detalhes obrigatórios foram registrados com sucesso.\n'
+                'Quando o projeto for entregue, o empregador deve clicar em '
+                '**✅ Concluir & Pagar** para efetuar o pagamento via PIX.'
+            ),
             color=COR_SUCESSO,
         )
         embed.add_field(
             name='💰  Valor Fechado',
-            value=f'**R$ {valor:,.2f}**',
+            value=f'**{formatar_brl(valor)}**',
             inline=True,
         )
         embed.add_field(

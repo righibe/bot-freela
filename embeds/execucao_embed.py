@@ -4,7 +4,7 @@ Embeds para o sistema de execução de projetos.
 
 import discord
 from config.settings import COR_EXECUCAO, COR_SUCESSO, COR_ALERTA, COR_ERRO
-from utils.helpers import formatar_data
+from utils.helpers import formatar_data, formatar_brl
 
 
 def criar_embed_projeto_criado(
@@ -28,7 +28,7 @@ def criar_embed_projeto_criado(
     embed.add_field(name='👨‍💻  Desenvolvedor', value=dev_nome, inline=True)
     embed.add_field(name='👤  Empregador', value=empregador_nome, inline=True)
     embed.add_field(name='\u200b', value='\u200b', inline=True)
-    embed.add_field(name='💰  Valor Fechado', value=f'**R$ {valor:,.2f}**', inline=True)
+    embed.add_field(name='💰  Valor Fechado', value=f'**{formatar_brl(valor)}**', inline=True)
     embed.add_field(name='⏰  Prazo', value=prazo or 'Não definido', inline=True)
     embed.add_field(name='\u200b', value='\u200b', inline=True)
     embed.add_field(
@@ -61,8 +61,11 @@ def criar_embed_regras_projeto() -> discord.Embed:
     embed.add_field(
         name='💳  Pagamento',
         value=(
-            '• O envio de **comprovante de pagamento** é obrigatório.\n'
-            '• Envie o comprovante neste canal após o pagamento.'
+            '• O pagamento é feito **pelo bot, via PIX** (AbacatePay).\n'
+            '• Ao finalizar, o empregador clica em **✅ Concluir & Pagar** e paga o QR Code.\n'
+            '• O dev recebe **85%** automaticamente na chave PIX cadastrada; '
+            '**15%** é a taxa da plataforma.\n'
+            '• **Não realize pagamentos por fora** — você perde a proteção da plataforma.'
         ),
         inline=False,
     )
@@ -141,7 +144,7 @@ def criar_embed_log_projeto(
     embed.add_field(name='👨‍💻  Dev', value=f'<@{dev_id}> (`{dev_nome}`)', inline=True)
     embed.add_field(name='👤  Empregador', value=f'<@{empregador_id}> (`{empregador_nome}`)', inline=True)
     embed.add_field(name='\u200b', value='\u200b', inline=True)
-    embed.add_field(name='💰  Valor', value=f'R$ {valor:,.2f}', inline=True)
+    embed.add_field(name='💰  Valor', value=formatar_brl(valor), inline=True)
     embed.add_field(name='⏰  Prazo', value=prazo or 'N/A', inline=True)
     embed.add_field(name='📅  Data', value=formatar_data(), inline=True)
     return embed

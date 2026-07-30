@@ -1,28 +1,37 @@
 """
 Cog de execução de projetos.
-Criação automática de canais privados, gerenciamento e logs.
+Criação automática de canais privados, conclusão, cancelamento e logs.
 """
 
+import asyncio
 import logging
+import re
+
 import discord
 from discord.ext import commands
 from discord import app_commands
-from config.settings import (
-    COR_EXECUCAO, COR_ALERTA, COR_SUCESSO,
-    CARGO_STAFF, CANAL_LOG_PROJETOS,
-)
+
+import config.settings as settings
+from config.settings import COR_EXECUCAO
 from core.database import (
-    Candidatura, ProjetoAtivo, buscar_projeto, buscar_dev,
-    buscar_empregador, salvar_projeto_ativo,
+    Candidatura, ProjetoAtivo, buscar_projeto, buscar_projeto_ativo,
+    buscar_projeto_ativo_por_candidatura,
+    salvar_projeto_ativo, atualizar_projeto_ativo,
     atualizar_projetos_ativos_dev, atualizar_status_projeto,
-    buscar_projeto_ativo_por_canal, listar_projetos_ativos_dev,
+    listar_projetos_ativos_dev, listar_projetos_ativos_por_status,
+    listar_candidaturas_projeto, atualizar_candidatura,
+    contar_devs, contar_empregadores, contar_projetos_por_status,
+    contar_candidaturas, contar_projetos_ativos, somar_receita_plataforma,
     _gerar_id,
 )
+from utils.locks import guarda_acao
 from embeds.execucao_embed import (
     criar_embed_projeto_criado, criar_embed_regras_projeto,
     criar_embed_alerta_dados_faltando, criar_embed_log_projeto,
+    criar_embed_projeto_concluido,
 )
 from views.execucao_views import ExecucaoProjetoView
+from utils.helpers import formatar_brl, formatar_brl_centavos
 
 logger = logging.getLogger('bot_freeela.cogs.execucao')
 
@@ -35,20 +44,49 @@ class ExecucaoCog(commands.Cog):
 
     async def cog_load(self):
         # Registrar views persistentes de projetos ativos
-        from core.database import _carregar_json, PROJETOS_ATIVOS_FILE
-        dados = _carregar_json(PROJETOS_ATIVOS_FILE)
-        count = 0
-        for d in dados:
-            if d.get('status') == 'ativo':
-                pa_id = d.get('id', '')
-                self.bot.add_view(ExecucaoProjetoView(projeto_ativo_id=pa_id))
-                count += 1
-        logger.info(
-            'Views persistentes registradas para %d projetos ativos',
-            count,
+        ativos = (
+            listar_projetos_ativos_por_status('ativo')
+            + listar_projetos_ativos_por_status('aguardando_pagamento')
         )
+        for pa in ativos:
+            self.bot.add_view(ExecucaoProjetoView(projeto_ativo_id=pa.id))
+        logger.info('Views persistentes registradas para %d projetos ativos', len(ativos))
+
+    # ══════════════════════════════════════════════════
+    #  CRIAÇÃO DO AMBIENTE DO PROJETO
+    # ══════════════════════════════════════════════════
 
     async def criar_projeto_ativo(
+        self,
+        guild: discord.Guild,
+        candidatura: Candidatura,
+    ):
+        """
+        Cria o ambiente do projeto de forma idempotente.
+
+        Se ambos os cliques de "Fechar Parceria" (ou um duplo-clique da parte
+        que confirma por último) dispararem a criação ao mesmo tempo, apenas
+        um ambiente é criado — evitando categorias/canais duplicados.
+        """
+        # Guarda durável: se o ambiente já foi salvo no banco, não recria.
+        if buscar_projeto_ativo_por_candidatura(candidatura.id):
+            logger.warning(
+                'Ambiente já existe para candidatura %s — ignorando duplicata',
+                candidatura.id,
+            )
+            return
+
+        # Guarda em memória: impede duas execuções concorrentes antes do commit.
+        with guarda_acao(('projeto_ativo', candidatura.id)) as livre:
+            if not livre:
+                logger.warning(
+                    'Criação de ambiente já em andamento para candidatura %s',
+                    candidatura.id,
+                )
+                return
+            await self._criar_projeto_ativo_impl(guild, candidatura)
+
+    async def _criar_projeto_ativo_impl(
         self,
         guild: discord.Guild,
         candidatura: Candidatura,
@@ -76,8 +114,8 @@ class ExecucaoCog(commands.Cog):
             return
 
         # Nome seguro para a categoria
-        nome_projeto = projeto.titulo[:30].replace(' ', '-').lower()
-        categoria_nome = f'📋 {nome_projeto}'
+        from utils.helpers import slug_canal
+        categoria_nome = f'📋・{slug_canal(projeto.titulo[:30])}'
 
         try:
             # 1. Configurar permissões
@@ -113,8 +151,8 @@ class ExecucaoCog(commands.Cog):
             }
 
             # Adicionar staff se o cargo existir
-            if CARGO_STAFF:
-                cargo_staff = guild.get_role(CARGO_STAFF)
+            if settings.CARGO_STAFF:
+                cargo_staff = guild.get_role(settings.CARGO_STAFF)
                 if cargo_staff:
                     overwrites[cargo_staff] = discord.PermissionOverwrite(
                         read_messages=True,
@@ -133,13 +171,13 @@ class ExecucaoCog(commands.Cog):
 
             # 3. Criar canal de texto
             canal_texto = await categoria.create_text_channel(
-                name='💬-projeto',
+                name='💬・projeto',
                 topic=f'Projeto: {projeto.titulo} | Dev: {dev.name} | Empregador: {emp.name}',
             )
 
             # 4. Criar canal de voz
             canal_voz = await categoria.create_voice_channel(
-                name='🔊 Reunião',
+                name='🔊・Reunião',
             )
 
             # 5. Salvar projeto ativo no banco
@@ -189,31 +227,14 @@ class ExecucaoCog(commands.Cog):
             await canal_texto.send(embed=embed_alerta)
 
             # 7. Log
-            if CANAL_LOG_PROJETOS:
-                canal_log = guild.get_channel(CANAL_LOG_PROJETOS)
-                if canal_log:
-                    embed_log = criar_embed_log_projeto(
-                        projeto_id=pa.id,
-                        titulo=projeto.titulo,
-                        dev_id=dev.id,
-                        dev_nome=dev.name,
-                        empregador_id=emp.id,
-                        empregador_nome=emp.name,
-                        valor=projeto.valor,
-                        prazo=projeto.prazo_estimado,
-                        status='ativo',
-                    )
-                    await canal_log.send(embed=embed_log)
+            await self.enviar_log_projeto(guild, pa, 'ativo', projeto.titulo)
 
             logger.info(
                 'Projeto ativo criado: %s | cat=%d | texto=%d | voz=%d',
                 pa.id, categoria.id, canal_texto.id, canal_voz.id,
             )
 
-            # ──────────────────────────────────────────────────────
-            # 8. LIMPEZA: remover canal de listagem + canal de negociação
-            # Feito APÓS toda a categoria ativa estar pronta.
-            # ──────────────────────────────────────────────────────
+            # 8. LIMPEZA: remover canal de listagem + canais de negociação
             await self._limpar_canais_anteriores(
                 guild=guild,
                 projeto=projeto,
@@ -232,10 +253,9 @@ class ExecucaoCog(commands.Cog):
         candidatura: Candidatura,
     ):
         """
-        Apaga o canal de listagem (vitrine de projetos) e o canal de
+        Apaga o canal de listagem (vitrine de projetos) e os canais de
         negociação após a parceria ser fechada.
         """
-        import asyncio
         await asyncio.sleep(3)  # pequena pausa para garantir embeds carregadas
 
         # 1. Deletar canal de listagem (vitrine de projetos disponíveis)
@@ -247,28 +267,12 @@ class ExecucaoCog(commands.Cog):
                     await canal_listagem.delete(
                         reason=f'Parceria fechada — projeto "{projeto.titulo}" removido da vitrine'
                     )
-                    logger.info(
-                        'Canal de listagem %d deletado (projeto %s)',
-                        canal_listagem_id, projeto.id,
-                    )
                 except discord.Forbidden:
-                    logger.error(
-                        'Sem permissão para deletar canal de listagem %d', canal_listagem_id
-                    )
+                    logger.error('Sem permissão para deletar canal de listagem %d', canal_listagem_id)
                 except Exception as e:
                     logger.error('Erro ao deletar canal de listagem: %s', e)
-            else:
-                logger.warning(
-                    'Canal de listagem %d não encontrado ou já deletado', canal_listagem_id
-                )
-        else:
-            logger.info(
-                'Projeto %s não tem canal_listagem_id salvo — pulando limpeza da vitrine',
-                projeto.id,
-            )
 
         # 2. Cancelar e deletar TODAS as negociações do projeto (não só a fechada)
-        from core.database import listar_candidaturas_projeto, atualizar_candidatura
         todas_candidaturas = listar_candidaturas_projeto(projeto.id)
 
         for cand in todas_candidaturas:
@@ -276,10 +280,6 @@ class ExecucaoCog(commands.Cog):
             if cand.id != candidatura.id and cand.status == 'negociando':
                 cand.status = 'cancelado'
                 atualizar_candidatura(cand)
-                logger.info(
-                    'Candidatura %s cancelada automaticamente (parceria fechada com outro dev)',
-                    cand.id,
-                )
 
                 # Notificar o dev que perdeu a vaga
                 try:
@@ -301,23 +301,189 @@ class ExecucaoCog(commands.Cog):
                     try:
                         if isinstance(canal_neg, discord.Thread):
                             await canal_neg.edit(archived=True, locked=True)
-                            logger.info(
-                                'Thread de negociação %d arquivada (cand %s)',
-                                canal_neg_id, cand.id,
-                            )
                         elif isinstance(canal_neg, discord.TextChannel):
                             await canal_neg.delete(
                                 reason=f'Parceria fechada para "{projeto.titulo}" — negociação encerrada'
-                            )
-                            logger.info(
-                                'Canal de negociação %d deletado (cand %s)',
-                                canal_neg_id, cand.id,
                             )
                     except discord.Forbidden:
                         logger.error('Sem permissão para deletar canal de negociação %d', canal_neg_id)
                     except Exception as e:
                         logger.error('Erro ao deletar canal de negociação: %s', e)
                     await asyncio.sleep(0.5)  # evitar rate limit
+
+    # ══════════════════════════════════════════════════
+    #  CONCLUSÃO
+    # ══════════════════════════════════════════════════
+
+    async def finalizar_conclusao(
+        self,
+        guild: discord.Guild,
+        projeto_ativo_id: str,
+        delay_limpeza: int = 0,
+    ):
+        """
+        Marca o projeto como concluído, envia embeds/log e arquiva os canais.
+        Chamado pelo fluxo de pagamento (após repasse) ou pela conclusão manual.
+        """
+        pa = buscar_projeto_ativo(projeto_ativo_id)
+        if not pa or pa.status == 'concluido':
+            return
+
+        pa.status = 'concluido'
+        atualizar_projeto_ativo(pa)
+        atualizar_projetos_ativos_dev(pa.dev_id, -1)
+        atualizar_status_projeto(pa.projeto_id, 'concluido')
+
+        projeto = buscar_projeto(pa.projeto_id)
+        titulo = projeto.titulo if projeto else 'Projeto'
+
+        canal_texto = guild.get_channel(pa.canal_texto_id)
+        if canal_texto:
+            try:
+                embed = criar_embed_projeto_concluido(titulo)
+                if delay_limpeza:
+                    embed.set_footer(
+                        text=f'Os canais deste projeto serão arquivados em {delay_limpeza} segundos.'
+                    )
+                await canal_texto.send(embed=embed)
+            except Exception as e:
+                logger.error('Erro ao enviar embed de conclusão: %s', e)
+
+        await self.enviar_log_projeto(guild, pa, 'concluido', titulo)
+
+        if delay_limpeza:
+            await asyncio.sleep(delay_limpeza)
+
+        await self._limpar_projeto(guild, pa, projeto)
+        logger.info('Projeto %s concluído e arquivado', pa.id)
+
+    # ══════════════════════════════════════════════════
+    #  LIMPEZA / REPUBLICAÇÃO
+    # ══════════════════════════════════════════════════
+
+    async def _limpar_projeto(self, guild: discord.Guild, pa, projeto):
+        """Remove os canais do projeto quando concluído: vitrine + categoria ativa."""
+        # 1. Deletar o canal de listagem da vitrine (se ainda existir)
+        canal_listagem_id = getattr(projeto, 'canal_listagem_id', 0) if projeto else 0
+        if canal_listagem_id:
+            canal_listagem = guild.get_channel(canal_listagem_id)
+            if canal_listagem and isinstance(canal_listagem, discord.TextChannel):
+                try:
+                    await canal_listagem.delete(
+                        reason=f'Projeto {pa.projeto_id} concluído — removido da vitrine'
+                    )
+                except Exception as e:
+                    logger.error('Erro ao deletar canal de listagem: %s', e)
+
+        # 2. Deletar a categoria inteira do projeto ativo
+        await self.deletar_categoria_projeto(guild, pa)
+
+    async def deletar_categoria_projeto(self, guild: discord.Guild, pa):
+        """Deleta todos os canais da categoria do projeto ativo e a categoria."""
+        if not pa.categoria_id:
+            return
+        categoria = guild.get_channel(pa.categoria_id)
+        if not categoria or not isinstance(categoria, discord.CategoryChannel):
+            logger.warning('Categoria %d não encontrada ou já deletada', pa.categoria_id)
+            return
+
+        for canal in list(categoria.channels):
+            try:
+                await canal.delete(reason=f'Projeto {pa.projeto_id} encerrado')
+            except discord.Forbidden:
+                logger.error('Sem permissão para deletar canal %d', canal.id)
+            except Exception as e:
+                logger.error('Erro ao deletar canal %d: %s', canal.id, e)
+            await asyncio.sleep(0.5)  # evitar rate limit
+
+        try:
+            await categoria.delete(reason=f'Projeto {pa.projeto_id} encerrado')
+        except Exception as e:
+            logger.error('Erro ao deletar categoria: %s', e)
+
+    async def republicar_projeto_na_vitrine(self, guild: discord.Guild, projeto):
+        """Republica um projeto cancelado na vitrine de Projetos Disponíveis."""
+        if not projeto:
+            return
+        categoria_projetos = guild.get_channel(settings.CATEGORIA_PROJETOS_ID)
+        if not categoria_projetos or not isinstance(categoria_projetos, discord.CategoryChannel):
+            logger.warning('Categoria de projetos não encontrada — projeto %s não republicado', projeto.id)
+            return
+
+        try:
+            from utils.helpers import nome_canal_projeto
+            nome_canal = nome_canal_projeto(projeto.categoria, projeto.titulo)
+            canal_projeto = await guild.create_text_channel(nome_canal, category=categoria_projetos)
+
+            from dataclasses import asdict
+            from embeds.projeto_embed import criar_embed_projeto_listagem
+            from views.projeto_views import ProjetoInteresseView
+
+            embed = criar_embed_projeto_listagem(asdict(projeto))
+            view = ProjetoInteresseView(projeto_id=projeto.id)
+
+            from core.tecnologias import mapa_cargos
+            cargos_tec = mapa_cargos()
+            pings = []
+            for lang in projeto.linguagens_requeridas:
+                cargo_id = cargos_tec.get(lang)
+                if cargo_id:
+                    cargo = guild.get_role(cargo_id)
+                    if cargo:
+                        pings.append(cargo.mention)
+            content = (
+                f"{' '.join(pings)} 🔄 Projeto **reaberto**: procurando dev com "
+                f"**{', '.join(projeto.linguagens_requeridas)}**!"
+                if pings else ''
+            )
+
+            msg = await canal_projeto.send(content=content, embed=embed, view=view)
+            from core.database import salvar_projeto
+            projeto.message_id = msg.id
+            projeto.canal_listagem_id = canal_projeto.id
+            salvar_projeto(projeto)
+            logger.info('Projeto %s republicado na vitrine (canal %d)', projeto.id, canal_projeto.id)
+        except Exception as e:
+            logger.exception('Erro ao republicar projeto %s: %s', projeto.id, e)
+
+    # ══════════════════════════════════════════════════
+    #  LOG
+    # ══════════════════════════════════════════════════
+
+    async def enviar_log_projeto(
+        self,
+        guild: discord.Guild,
+        pa,
+        status: str,
+        titulo: str,
+    ):
+        """Envia log do projeto para o canal de logs."""
+        canal_log = guild.get_channel(settings.CANAL_LOG_PROJETOS)
+        if not canal_log:
+            return
+
+        dev = guild.get_member(pa.dev_id)
+        emp = guild.get_member(pa.empregador_id)
+
+        embed = criar_embed_log_projeto(
+            projeto_id=pa.id,
+            titulo=titulo,
+            dev_id=pa.dev_id,
+            dev_nome=dev.name if dev else str(pa.dev_id),
+            empregador_id=pa.empregador_id,
+            empregador_nome=emp.name if emp else str(pa.empregador_id),
+            valor=pa.valor,
+            prazo=pa.prazo,
+            status=status,
+        )
+        try:
+            await canal_log.send(embed=embed)
+        except Exception as e:
+            logger.error('Erro ao enviar log de projeto: %s', e)
+
+    # ══════════════════════════════════════════════════
+    #  SLASH COMMANDS
+    # ══════════════════════════════════════════════════
 
     @app_commands.command(
         name='meus_projetos',
@@ -339,6 +505,10 @@ class ExecucaoCog(commands.Cog):
             color=COR_EXECUCAO,
         )
 
+        status_labels = {
+            'ativo': '🟢 Em andamento',
+            'aguardando_pagamento': '💳 Aguardando pagamento',
+        }
         for pa in projetos:
             projeto = buscar_projeto(pa.projeto_id)
             titulo = projeto.titulo if projeto else 'Projeto desconhecido'
@@ -348,10 +518,10 @@ class ExecucaoCog(commands.Cog):
             embed.add_field(
                 name=titulo,
                 value=(
-                    f'💰 R$ {pa.valor:,.2f}\n'
+                    f'💰 {formatar_brl(pa.valor)}\n'
                     f'⏰ {pa.prazo or "N/A"}\n'
                     f'💬 {canal_mention}\n'
-                    f'📌 `{pa.status}`'
+                    f'📌 {status_labels.get(pa.status, pa.status)}'
                 ),
                 inline=False,
             )
@@ -364,22 +534,8 @@ class ExecucaoCog(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     async def status_plataforma(self, interaction: discord.Interaction):
-        from core.database import (
-            _carregar_json, DEVS_FILE, EMPREGADORES_FILE,
-            PROJETOS_FILE, CANDIDATURAS_FILE, PROJETOS_ATIVOS_FILE,
-        )
-
-        devs = _carregar_json(DEVS_FILE)
-        emps = _carregar_json(EMPREGADORES_FILE)
-        projs = _carregar_json(PROJETOS_FILE)
-        cands = _carregar_json(CANDIDATURAS_FILE)
-        ativos = _carregar_json(PROJETOS_ATIVOS_FILE)
-
-        proj_abertos = len([p for p in projs if p.get('status') == 'aberto'])
-        proj_andamento = len([p for p in projs if p.get('status') == 'em_andamento'])
-        proj_concluidos = len([p for p in projs if p.get('status') == 'concluido'])
-        cands_ativas = len([c for c in cands if c.get('status') == 'negociando'])
-        ativos_count = len([a for a in ativos if a.get('status') == 'ativo'])
+        projetos_status = contar_projetos_por_status()
+        cands_ativas, cands_total = contar_candidaturas()
 
         embed = discord.Embed(
             title='📊  Status da Plataforma Freeela',
@@ -387,22 +543,26 @@ class ExecucaoCog(commands.Cog):
         )
         embed.add_field(
             name='👨‍💻  Devs Verificados',
-            value=f'**{len(devs)}**',
+            value=f'**{contar_devs()}**',
             inline=True,
         )
         embed.add_field(
             name='🏢  Empregadores',
-            value=f'**{len(emps)}**',
+            value=f'**{contar_empregadores()}**',
             inline=True,
         )
-        embed.add_field(name='\u200b', value='\u200b', inline=True)
+        embed.add_field(
+            name='🏦  Receita da Plataforma',
+            value=f'**{formatar_brl_centavos(somar_receita_plataforma())}**',
+            inline=True,
+        )
         embed.add_field(
             name='📂  Projetos',
             value=(
-                f'🟢 Abertos: **{proj_abertos}**\n'
-                f'🔵 Em andamento: **{proj_andamento}**\n'
-                f'✅ Concluídos: **{proj_concluidos}**\n'
-                f'📋 Total: **{len(projs)}**'
+                f'🟢 Abertos: **{projetos_status.get("aberto", 0)}**\n'
+                f'🔵 Em andamento: **{projetos_status.get("em_andamento", 0)}**\n'
+                f'✅ Concluídos: **{projetos_status.get("concluido", 0)}**\n'
+                f'📋 Total: **{sum(projetos_status.values())}**'
             ),
             inline=True,
         )
@@ -410,13 +570,16 @@ class ExecucaoCog(commands.Cog):
             name='🤝  Candidaturas',
             value=(
                 f'💬 Negociando: **{cands_ativas}**\n'
-                f'📋 Total: **{len(cands)}**'
+                f'📋 Total: **{cands_total}**'
             ),
             inline=True,
         )
         embed.add_field(
             name='🏗️  Projetos Ativos',
-            value=f'**{ativos_count}**',
+            value=(
+                f'**{contar_projetos_ativos("ativo")}** em execução\n'
+                f'**{contar_projetos_ativos("aguardando_pagamento")}** aguardando pagamento'
+            ),
             inline=True,
         )
         embed.add_field(
@@ -426,7 +589,7 @@ class ExecucaoCog(commands.Cog):
         )
         embed.add_field(
             name='📡  API',
-            value=f'`http://127.0.0.1:8000`',
+            value=f'`http://{settings.API_HOST}:{settings.API_PORT}`',
             inline=True,
         )
 

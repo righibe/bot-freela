@@ -8,6 +8,7 @@ import discord
 from discord.ui import View, Button, Select
 from config.settings import CATEGORIAS_PROJETO, COR_PRINCIPAL
 from modals.empregador_modal import EmpregadorModal
+from utils.locks import guarda_acao
 
 logger = logging.getLogger('bot_freeela.views.empregador')
 
@@ -36,56 +37,72 @@ class IniciarEmpregadorView(View):
             )
             return
 
-        # Verificar se já tem thread ativa
-        for thread in channel.threads:
-            if thread.name == f'projeto-{user.name}' and not thread.archived:
+        # Aceite dos Termos de Uso é obrigatório antes de criar projetos
+        from views.termos_views import exigir_aceite_termos
+        if not await exigir_aceite_termos(interaction):
+            return
+
+        # Trava de idempotência: impede que um duplo-clique crie dois tópicos.
+        # A reserva da chave é síncrona (sem await), então dois cliques em
+        # sequência não passam os dois pela criação da thread.
+        with guarda_acao(('empregador', user.id)) as livre:
+            if not livre:
                 await interaction.response.send_message(
-                    f'⚠️ Você já possui uma verificação em andamento: {thread.mention}',
+                    '⏳ Seu cadastro já está sendo criado. Aguarde um instante...',
                     ephemeral=True,
                 )
                 return
 
-        try:
-            # Criar thread privada
-            thread = await channel.create_thread(
-                name=f'projeto-{user.name}',
-                type=discord.ChannelType.private_thread,
-                auto_archive_duration=1440,  # 24 horas
-                reason=f'Cadastro de projeto por {user.name}',
-            )
-            await thread.add_user(user)
+            # Verificar se já tem thread ativa
+            for thread in channel.threads:
+                if thread.name == f'projeto-{user.name}' and not thread.archived:
+                    await interaction.response.send_message(
+                        f'⚠️ Você já possui uma verificação em andamento: {thread.mention}',
+                        ephemeral=True,
+                    )
+                    return
 
-            embed = discord.Embed(
-                title='🏢  Cadastro de Projeto',
-                description=(
-                    f'Olá {user.mention}!\n\n'
-                    f'Para cadastrar seu projeto, selecione primeiro a **categoria** abaixo.\n'
-                    f'Em seguida, preencha o formulário completo.'
-                ),
-                color=COR_PRINCIPAL,
-            )
-            embed.set_footer(text='Esta thread é privada.')
+            try:
+                # Criar thread privada
+                thread = await channel.create_thread(
+                    name=f'projeto-{user.name}',
+                    type=discord.ChannelType.private_thread,
+                    auto_archive_duration=1440,  # 24 horas
+                    reason=f'Cadastro de projeto por {user.name}',
+                )
+                await thread.add_user(user)
 
-            view = SelecaoCategoriaView(user_id=user.id, thread=thread)
-            await thread.send(embed=embed, view=view)
+                embed = discord.Embed(
+                    title='🏢  Cadastro de Projeto',
+                    description=(
+                        f'Olá {user.mention}!\n\n'
+                        f'Para cadastrar seu projeto, selecione primeiro a **categoria** abaixo.\n'
+                        f'Em seguida, preencha o formulário completo.'
+                    ),
+                    color=COR_PRINCIPAL,
+                )
+                embed.set_footer(text='Esta thread é privada.')
 
-            await interaction.response.send_message(
-                f'✅ Seu cadastro foi iniciado! Acesse: {thread.mention}',
-                ephemeral=True,
-            )
-            logger.info('Thread de empregador criada para %s', user.name)
+                view = SelecaoCategoriaView(user_id=user.id, thread=thread)
+                await thread.send(embed=embed, view=view)
 
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                '❌ Sem permissão para criar threads.',
-                ephemeral=True,
-            )
-        except Exception as e:
-            await interaction.response.send_message(
-                '❌ Erro ao iniciar o cadastro.',
-                ephemeral=True,
-            )
-            logger.exception('Erro ao criar thread de empregador: %s', e)
+                await interaction.response.send_message(
+                    f'✅ Seu cadastro foi iniciado! Acesse: {thread.mention}',
+                    ephemeral=True,
+                )
+                logger.info('Thread de empregador criada para %s', user.name)
+
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    '❌ Sem permissão para criar threads.',
+                    ephemeral=True,
+                )
+            except Exception as e:
+                await interaction.response.send_message(
+                    '❌ Erro ao iniciar o cadastro.',
+                    ephemeral=True,
+                )
+                logger.exception('Erro ao criar thread de empregador: %s', e)
 
 
 class SelecaoCategoriaView(View):

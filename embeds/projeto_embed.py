@@ -3,8 +3,8 @@ Embeds para listagem e exibição de projetos.
 """
 
 import discord
-from config.settings import COR_PROJETO, COR_MATCHING
-from utils.helpers import formatar_data
+from config.settings import COR_PROJETO, COR_MATCHING, TAXA_PLATAFORMA_PERCENT
+from utils.helpers import formatar_data, formatar_brl
 
 
 def criar_embed_projeto_listagem(projeto: dict) -> discord.Embed:
@@ -39,7 +39,7 @@ def criar_embed_projeto_listagem(projeto: dict) -> discord.Embed:
     valor = projeto.get('valor', 0)
     embed.add_field(
         name='💰  Valor Oferecido',
-        value=f'**R$ {valor:,.2f}**',
+        value=f'**{formatar_brl(valor)}**',
         inline=True,
     )
 
@@ -139,13 +139,22 @@ def criar_embed_negociacao(projeto: dict, dev_nome: str, empregador_nome: str) -
     )
     embed.add_field(
         name='💰  Valor Proposto',
-        value=f'R$ {projeto.get("valor", 0):,.2f}',
+        value=formatar_brl(projeto.get('valor', 0)),
         inline=True,
     )
     embed.add_field(
         name='🛠️  Stack',
         value=', '.join(projeto.get('linguagens_requeridas', ['N/A'])),
         inline=True,
+    )
+    embed.add_field(
+        name='💳  Como funciona o pagamento',
+        value=(
+            f'O pagamento é feito **via PIX pelo bot** ao concluir o projeto. '
+            f'O dev recebe **{100 - TAXA_PLATAFORMA_PERCENT:.0f}%** automaticamente '
+            f'na chave PIX cadastrada ({TAXA_PLATAFORMA_PERCENT:.0f}% é a taxa da plataforma).'
+        ),
+        inline=False,
     )
     embed.set_footer(text='⚠️ Ambos devem clicar em Fechar Parceria para prosseguir.')
     return embed

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes.validate_dev import router as dev_router
 from api.routes.validate_employer import router as employer_router
+from api.routes.webhook_abacatepay import router as webhook_router
 
 logger = logging.getLogger('bot_freeela.api')
 
@@ -30,6 +31,7 @@ app.add_middleware(
 # Registrar rotas
 app.include_router(dev_router, tags=['Dev Validation'])
 app.include_router(employer_router, tags=['Employer Validation'])
+app.include_router(webhook_router, tags=['Payments'])
 
 
 @app.get('/')
@@ -41,6 +43,7 @@ async def root():
         'endpoints': [
             'POST /validate/dev',
             'POST /validate/employer',
+            'POST /webhooks/abacatepay',
         ],
     }
 

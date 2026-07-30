@@ -7,7 +7,7 @@ import logging
 from core.database import (
     DevVerificado, Projeto, buscar_dev, listar_projetos_ativos_dev
 )
-from config.settings import MAX_PROJETOS_ATIVOS_POR_DEV
+from config.settings import MAX_PROJETOS_ATIVOS_POR_DEV, MATCH_MIN_TECNOLOGIAS
 
 logger = logging.getLogger('bot_freeela.core.matching')
 
@@ -31,7 +31,7 @@ EXPERIENCIA_DEV_NIVEL = {
 def verificar_compatibilidade_dev_projeto(
     dev: DevVerificado,
     projeto: Projeto,
-    min_stack_matches: int = 2,
+    min_stack_matches: int = MATCH_MIN_TECNOLOGIAS,
 ) -> dict:
     """
     Verifica se um dev é compatível com um projeto.

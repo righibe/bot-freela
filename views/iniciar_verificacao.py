@@ -15,7 +15,12 @@ class IniciarVerificacaoView(View):
         if not guild:
             await interaction.response.send_message('❌ Erro interno. Tente novamente.', ephemeral=True)
             return
-            
+
+        # Aceite dos Termos de Uso é obrigatório antes da verificação
+        from views.termos_views import exigir_aceite_termos
+        if not await exigir_aceite_termos(interaction):
+            return
+
         from modals.perfil_profissional import PerfilProfissionalModal
         modal = PerfilProfissionalModal(user_id=interaction.user.id)
         await interaction.response.send_modal(modal)

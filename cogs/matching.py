@@ -26,17 +26,13 @@ class MatchingCog(commands.Cog):
 
     async def cog_load(self):
         # Registrar views persistentes de negociações ativas
-        from core.database import _carregar_json, CANDIDATURAS_FILE
-        dados = _carregar_json(CANDIDATURAS_FILE)
-        count = 0
-        for d in dados:
-            if d.get('status') == 'negociando':
-                cand_id = d.get('id', '')
-                self.bot.add_view(NegociacaoView(candidatura_id=cand_id))
-                count += 1
+        from core.database import listar_candidaturas_por_status
+        negociando = listar_candidaturas_por_status('negociando')
+        for cand in negociando:
+            self.bot.add_view(NegociacaoView(candidatura_id=cand.id))
         logger.info(
             'Views persistentes registradas para %d negociações ativas',
-            count,
+            len(negociando),
         )
 
     @app_commands.command(
@@ -93,9 +89,23 @@ class MatchingCog(commands.Cog):
             value=(
                 f'[GitHub]({dev.github_url})' +
                 (f' | [LinkedIn]({dev.linkedin_url})' if dev.linkedin_url else '')
-            ),
+            ) if dev.github_url else 'N/A',
             inline=False,
         )
+
+        if dev.pix_key:
+            from views.pagamento_views import mascarar_chave
+            embed.add_field(
+                name='💳  Recebimento (PIX)',
+                value=f'`{mascarar_chave(dev.pix_key)}` ({dev.pix_key_type})',
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name='💳  Recebimento (PIX)',
+                value='⚠️ Nenhuma chave cadastrada — use **/configurar_pagamento**',
+                inline=False,
+            )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

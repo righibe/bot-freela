@@ -3,19 +3,26 @@ Configurações centrais do sistema Freeela.
 Contém IDs de canais, cargos, constantes de validação e mensagens.
 """
 
+import os
 import discord
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ══════════════════════════════════════════════════════
 #  CANAIS
 # ══════════════════════════════════════════════════════
-CANAL_VERIFICAR_DEV = 1495614476060459040
+CANAL_VERIFICAR_DEV = 1525187271660277760
 CANAL_VERIFICAR_EMPREGADOR = 1503840999615758386          # Atualizar com o ID real
-CANAL_ATUALIZAR_PERFIL_DEV = 1502790582370566186                            # Atualizar com o ID real
+CANAL_ATUALIZAR_PERFIL_DEV = 1525187274331914250                            # Atualizar com o ID real
 CATEGORIA_PROJETOS_ID = 1500684318412898427               # Atualizar com o ID real
-CATEGORIA_NEGOCIACAO_ID = 1500684319646027858                               # Atualizar com o ID real
+CATEGORIA_NEGOCIACAO_ID = 1525187265314427081                               # Atualizar com o ID real
 CATEGORIA_VERIFICACAO_ID = 1495614476060459038            # Categoria de verificação
 CANAL_LOG_DEV = 1497289159344128081                       # Atualizar com o ID real
 CANAL_LOG_PROJETOS = 1500684578291978240                  # Atualizar com o ID real
+CANAL_REGRAS = 1525186537262809109                        # Canal oficial de regras
+CANAL_ABRIR_TICKET = 1525192606072705227                                    # Preenchido pelo setup automático
+CATEGORIA_TICKETS_ID = 1525192604898033684                                  # Preenchido pelo setup automático
 
 # ══════════════════════════════════════════════════════
 #  CARGOS
@@ -23,6 +30,7 @@ CANAL_LOG_PROJETOS = 1500684578291978240                  # Atualizar com o ID r
 CARGO_DEV_VERIFICADO = 1500684314999001108
 CARGO_EMPREGADOR_VERIFICADO = 1500684315896320012         # Atualizar com o ID real
 CARGO_STAFF = 1500684317305868451                         # Atualizar com o ID real
+CARGO_TERMOS_ACEITOS = 1525205157867163742                                  # Preenchido pelo setup automático
 DEV_ROLE_NAME = 'Desenvolvedor Verificado'
 
 # Função de normalização para melhorar a busca por nome de cargo
@@ -140,6 +148,10 @@ SCORE_COMPATIBILIDADE_MIN = 65
 SCORE_INTEGRIDADE_MIN = 70
 LINGUAGENS_CONFIRMADAS_MIN = 2
 
+# Tecnologias por dev e regra de match
+MAX_TECNOLOGIAS_POR_DEV = 5        # máximo de tecnologias no perfil
+MATCH_MIN_TECNOLOGIAS = 2          # mínimo em comum para dar match com um projeto
+
 # Empregador
 SCORE_EMPREGADOR_MIN = 60
 VALOR_MINIMO_PROJETO = 50.0     # R$
@@ -157,6 +169,7 @@ DESCRICAO_MINIMA_INTERESSE = 10
 #  CORES
 # ══════════════════════════════════════════════════════
 COR_PRINCIPAL = 5793266
+COR_CARD_ACCENT = 0x5682F7   # azul da identidade — faixa lateral dos cards V2
 COR_SUCESSO = 5763719
 COR_ALERTA = 16705372
 COR_ERRO = 15548997
@@ -182,3 +195,51 @@ MSG_APROVADO_AUTO = '🎉 Parabéns! Sua verificação foi aprovada automaticame
 API_BASE_URL = 'http://127.0.0.1:8000'
 API_HOST = '127.0.0.1'
 API_PORT = 8000
+
+# ══════════════════════════════════════════════════════
+#  PAGAMENTOS (AbacatePay)
+# ══════════════════════════════════════════════════════
+# Chave da API AbacatePay (https://app.abacatepay.com -> Integrações -> API Keys).
+# Chaves de desenvolvimento permitem simular pagamentos sem dinheiro real.
+ABACATEPAY_API_KEY = os.getenv('ABACATEPAY_API_KEY', '')
+
+# Secret configurado no webhook do painel da AbacatePay (opcional — o bot também
+# confirma pagamentos por polling, então o webhook é um acelerador, não requisito).
+ABACATEPAY_WEBHOOK_SECRET = os.getenv('ABACATEPAY_WEBHOOK_SECRET', '')
+
+# Percentual retido pela plataforma em cada projeto concluído.
+TAXA_PLATAFORMA_PERCENT = float(os.getenv('TAXA_PLATAFORMA_PERCENT', '15'))
+
+# Tempo de validade do QR Code PIX gerado para o empregador (segundos).
+PIX_EXPIRACAO_SEGUNDOS = int(os.getenv('PIX_EXPIRACAO_SEGUNDOS', '3600'))
+
+# Intervalo do polling de status da cobrança (segundos).
+PIX_POLL_INTERVALO_SEGUNDOS = 20
+
+# ══════════════════════════════════════════════════════
+#  TERMOS DE USO
+# ══════════════════════════════════════════════════════
+# Ao alterar o conteúdo de TERMOS_DE_USO.md, incremente a versão —
+# todos os usuários precisarão aceitar novamente.
+TERMOS_VERSAO = '1.0'
+TERMOS_DATA_VIGENCIA = '10 de julho de 2026'
+
+TIPOS_CHAVE_PIX = [
+    ('CPF', 'CPF', '🪪'),
+    ('CNPJ', 'CNPJ', '🏢'),
+    ('E-mail', 'EMAIL', '📧'),
+    ('Telefone', 'PHONE', '📱'),
+    ('Chave aleatória', 'RANDOM', '🎲'),
+]
+
+# ══════════════════════════════════════════════════════
+#  TICKETS
+# ══════════════════════════════════════════════════════
+# (rótulo, slug, emoji, descrição curta)
+TIPOS_TICKET = [
+    ('Problema com Pagamento', 'pagamento', '💰', 'Cobrança, repasse ou PIX que não chegou'),
+    ('Disputa de Projeto', 'disputa', '⚖️', 'Conflito entre dev e contratante'),
+    ('Denúncia', 'denuncia', '🚨', 'Denunciar usuário, golpe ou pagamento por fora'),
+    ('Bug / Erro do Bot', 'bug', '🐛', 'Algo não funcionou como deveria'),
+    ('Dúvida / Outros', 'duvida', '❓', 'Qualquer outro assunto'),
+]

@@ -64,7 +64,7 @@ class StaffReviewView(View):
         user_id = None
         projeto_id = None
         tipo = 'dev'
-        if 'Empregador' in embed.title:
+        if 'Empregador' in (embed.title or ''):
             tipo = 'empregador'
             
         for field in embed.fields:
@@ -171,7 +171,7 @@ class StaffReviewView(View):
                 await interaction.followup.send('⚠️ Projeto não encontrado para publicação. Verifique o ID.', ephemeral=True)
                 return
 
-            from config.settings import CATEGORIA_PROJETOS_ID, CARGOS_LINGUAGEM
+            from config.settings import CATEGORIA_PROJETOS_ID
             categoria_projetos = self._localizar_categoria(
                 interaction.guild,
                 CATEGORIA_PROJETOS_ID,
@@ -193,11 +193,8 @@ class StaffReviewView(View):
             salvar_projeto(projeto)
 
             try:
-                import re
-                nome_canal = f"{projeto.categoria[:10].lower()}-{projeto.titulo[:15].lower().replace(' ', '-') }"
-                nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal)
-                if not nome_canal:
-                    nome_canal = f"proj-{projeto.id[:8]}"
+                from utils.helpers import nome_canal_projeto
+                nome_canal = nome_canal_projeto(projeto.categoria, projeto.titulo)
                 canal_projeto = await interaction.guild.create_text_channel(nome_canal, category=categoria_projetos)
 
                 from embeds.projeto_embed import criar_embed_projeto_listagem
@@ -207,10 +204,12 @@ class StaffReviewView(View):
                 embed_listagem = criar_embed_projeto_listagem(asdict(projeto))
                 view_int = ProjetoInteresseView(projeto_id=projeto.id)
 
+                from core.tecnologias import mapa_cargos
+                cargos_tec = mapa_cargos()
                 pings = []
                 for lang in projeto.linguagens_requeridas:
-                    if lang in CARGOS_LINGUAGEM:
-                        cargo_lang = interaction.guild.get_role(CARGOS_LINGUAGEM[lang])
+                    if lang in cargos_tec:
+                        cargo_lang = interaction.guild.get_role(cargos_tec[lang])
                         if cargo_lang:
                             pings.append(cargo_lang.mention)
 

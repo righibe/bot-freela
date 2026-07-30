@@ -8,46 +8,19 @@ from utils.helpers import formatar_data
 
 
 def criar_embed_verificacao_empregador() -> discord.Embed:
-    """Embed inicial no canal #verificar-empregador."""
+    """Embed inicial no canal de empregadores."""
     embed = discord.Embed(
-        title='🏢  Verificação de Empregador',
         description=(
-            'Para publicar projetos na plataforma **Freeela**, você precisa '
-            'passar pelo processo de verificação de empregador.\n\n'
-            'O processo analisa:\n'
-            '>>> • Coerência da descrição do projeto\n'
-            '• Valor oferecido vs complexidade\n'
-            '• Categoria e stack tecnológica\n'
-            '• Integridade geral dos dados\n\n'
+            '## Precisa de um programador? 🏢\n\n'
+            '**1.** Clique em **📋 Criar Projeto** e preencha o formulário\n'
+            '**2.** Seu projeto entra na vitrine e os **devs verificados** vêm negociar\n'
+            '**3.** Projeto entregue? Pague o **QR Code PIX** — só no final 🔒\n\n'
+            '💡 Quanto mais detalhada a descrição, melhores os candidatos. '
+            'Valor mínimo: **R$ 50**.'
         ),
         color=COR_PRINCIPAL,
     )
-    embed.add_field(
-        name='📋  Como funciona?',
-        value=(
-            '```\n'
-            '1️⃣ Clique no botão abaixo\n'
-            '2️⃣ Preencha o formulário completo\n'
-            '3️⃣ Aguarde a validação automática\n'
-            '4️⃣ Se aprovado, seu projeto será listado\n'
-            '```'
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name='💰  Valor Mínimo',
-        value='R$ 50,00',
-        inline=True,
-    )
-    embed.add_field(
-        name='📝  Descrição',
-        value='Mínimo 30 caracteres',
-        inline=True,
-    )
-    embed.set_footer(
-        text='Freeela • Verificação de Empregador',
-        icon_url='https://cdn.discordapp.com/embed/avatars/0.png',
-    )
+    embed.set_footer(text='Publicar é grátis • Pagamento seguro pelo bot')
     return embed
 
 

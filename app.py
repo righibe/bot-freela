@@ -27,6 +27,12 @@ if GUILD_ID:
 # ══════════════════════════════════════════════════════
 #  LOGGING
 # ══════════════════════════════════════════════════════
+# Console do Windows usa cp1252 por padrão e não imprime emoji —
+# forçar UTF-8 evita UnicodeEncodeError nos logs.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)-8s | %(name)-35s | %(message)s',
@@ -57,11 +63,16 @@ bot = commands.Bot(
 
 # Todos os cogs do sistema
 COGS = [
+    'cogs.termos',         # Termos de Uso (aceite obrigatório)
     'cogs.verificacao',    # Verificação de devs
     'cogs.empregador',     # Verificação de empregadores
     'cogs.projetos',       # Listagem de projetos
     'cogs.matching',       # Matching dev ↔ projeto
     'cogs.execucao',       # Execução de projetos
+    'cogs.pagamentos',     # Pagamentos via AbacatePay (PIX + repasse)
+    'cogs.tickets',        # Sistema de tickets de suporte
+    'cogs.tecnologias',    # Registro e sugestão de tecnologias
+    'cogs.staff',          # Comandos administrativos (/registrar, /vincular...)
 ]
 
 

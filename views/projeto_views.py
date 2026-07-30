@@ -14,6 +14,7 @@ from core.database import (
 )
 from core.protection import verificar_candidatura_permitida
 from embeds.projeto_embed import criar_embed_interesse_enviado, criar_embed_negociacao
+from utils.locks import guarda_acao
 
 logger = logging.getLogger('bot_freeela.views.projeto')
 
@@ -41,21 +42,23 @@ class ProjetoInteresseView(View):
             await interaction.response.send_message('❌ Erro interno.', ephemeral=True)
             return
 
+        # Aceite dos Termos de Uso é obrigatório antes de se candidatar
+        from views.termos_views import exigir_aceite_termos
+        if not await exigir_aceite_termos(interaction):
+            return
+
         # 1. Verificar se é dev verificado
+        # Fallback: se tem o cargo mas não está no banco (verificado antes do
+        # sistema atual), reconstrói o registro a partir dos cargos de linguagem.
         dev = buscar_dev(user.id)
         if not dev:
-            from config.settings import get_cargo_dev_verificado, CARGOS_LINGUAGEM
+            from config.settings import get_cargo_dev_verificado
+            from core.tecnologias import mapa_cargos
             cargo_dev = get_cargo_dev_verificado(guild)
             if cargo_dev and cargo_dev in user.roles:
-                from core.database import DevVerificado
+                from core.database import DevVerificado, salvar_dev
                 linguagens_confirmadas = []
-                for lang, cargo_id in CARGOS_LINGUAGEM.items():
-                    cargo_lang = guild.get_role(cargo_id)
-                    if cargo_lang and cargo_lang in user.roles:
-                        linguagens_confirmadas.append(lang)
-                from core.database import DevVerificado
-                linguagens_confirmadas = []
-                for lang, cargo_id in CARGOS_LINGUAGEM.items():
+                for lang, cargo_id in mapa_cargos().items():
                     cargo_lang = guild.get_role(cargo_id)
                     if cargo_lang and cargo_lang in user.roles:
                         linguagens_confirmadas.append(lang)
@@ -67,13 +70,10 @@ class ProjetoInteresseView(View):
                         experiencia='qualquer',
                         senioridade='Não determinado',
                         area='Não determinado',
-                        github_url='',
-                        linkedin_url='',
                         compatibilidade=70,
                         integridade=70,
-                        data_verificacao='',
-                        projetos_ativos=0,
                     )
+                    salvar_dev(dev)
 
         if not dev:
             await interaction.response.send_message(
@@ -125,89 +125,139 @@ class ProjetoInteresseView(View):
             )
             return
 
-        # 6. Tudo OK — criar thread de negociação
-        await interaction.response.defer(ephemeral=True)
+        # 6. Match obrigatório: o projeto é visível para todos, mas só quem é
+        # compatível (stack + experiência + disponibilidade) pode se candidatar.
+        from core.matching_engine import verificar_compatibilidade_dev_projeto
+        compat = verificar_compatibilidade_dev_projeto(dev, projeto)
+        if not compat['compativel']:
+            embed_nomatch = discord.Embed(
+                title='🔒  Você ainda não dá match com este projeto',
+                description=(
+                    'Este projeto exige um perfil compatível para candidatura:\n\n'
+                    + '\n'.join(f'• {m}' for m in compat['motivos_rejeicao'])
+                ),
+                color=COR_ALERTA,
+            )
+            if compat['linguagens_match']:
+                embed_nomatch.add_field(
+                    name='✅  Você tem',
+                    value=', '.join(f'`{l}`' for l in compat['linguagens_match']),
+                    inline=True,
+                )
+            if compat['linguagens_faltando']:
+                embed_nomatch.add_field(
+                    name='❌  Falta',
+                    value=', '.join(f'`{l}`' for l in compat['linguagens_faltando']),
+                    inline=True,
+                )
+            embed_nomatch.set_footer(
+                text='Aprendeu uma stack nova? Atualize seu perfil no canal 🔄・atualizar-perfil!'
+            )
+            await interaction.response.send_message(embed=embed_nomatch, ephemeral=True)
+            return
 
-        try:
-            # Obter a categoria Negociação
-            from config.settings import CATEGORIA_NEGOCIACAO_ID
-            cat_negociacao = guild.get_channel(CATEGORIA_NEGOCIACAO_ID)
-            
-            if not cat_negociacao or not isinstance(cat_negociacao, discord.CategoryChannel):
-                await interaction.followup.send(
-                    '❌ Categoria de negociação não encontrada. Contate a staff.',
-                    ephemeral=True
+        # 7. Tudo OK — criar canal de negociação
+        # Trava de idempotência: impede que um duplo-clique crie dois canais
+        # de negociação para o mesmo dev no mesmo projeto.
+        with guarda_acao(('interesse', user.id, self.projeto_id)) as livre:
+            if not livre:
+                await interaction.response.send_message(
+                    '⏳ Sua candidatura já está sendo processada. Aguarde um instante...',
+                    ephemeral=True,
                 )
                 return
 
-            empregador = guild.get_member(projeto.empregador_id)
-            empregador_nome = empregador.display_name if empregador else projeto.empregador_nome
+            await interaction.response.defer(ephemeral=True)
 
-            import re
-            nome_canal = f"negoc-{user.name}-{projeto.titulo[:10]}"
-            nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal.lower())
+            try:
+                # Obter a categoria Negociação
+                from config.settings import CATEGORIA_NEGOCIACAO_ID
+                cat_negociacao = guild.get_channel(CATEGORIA_NEGOCIACAO_ID)
 
-            # Definir permissões: apenas Dev, Empregador e bot podem ver
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, embed_links=True)
-            }
-            if empregador:
-                overwrites[empregador] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                if not cat_negociacao or not isinstance(cat_negociacao, discord.CategoryChannel):
+                    await interaction.followup.send(
+                        '❌ Categoria de negociação não encontrada. Contate a staff.',
+                        ephemeral=True
+                    )
+                    return
 
-            # Criar canal de texto na categoria
-            thread = await guild.create_text_channel(
-                name=nome_canal,
-                category=cat_negociacao,
-                overwrites=overwrites,
-                reason=f'Negociação: {user.name} → {projeto.titulo}'
-            )
+                # Revalidar candidatura dentro da trava: se um clique anterior
+                # já registrou o dev, não cria um segundo canal.
+                projeto_atual = buscar_projeto(self.projeto_id)
+                if projeto_atual and user.id in projeto_atual.candidatos:
+                    await interaction.followup.send(
+                        '⚠️ Você já se candidatou a este projeto.',
+                        ephemeral=True,
+                    )
+                    return
 
-            # Registrar candidatura
-            candidatura = Candidatura(
-                id=_gerar_id('cand'),
-                projeto_id=projeto.id,
-                dev_id=user.id,
-                dev_username=user.name,
-                empregador_id=projeto.empregador_id,
-                thread_id=thread.id,
-                status='negociando',
-            )
-            salvar_candidatura(candidatura)
-            adicionar_candidato_projeto(projeto.id, user.id)
+                empregador = guild.get_member(projeto.empregador_id)
+                empregador_nome = empregador.display_name if empregador else projeto.empregador_nome
 
-            # Registrar cooldown
-            registrar_cooldown(user.id, 'candidatura')
+                from utils.helpers import nome_canal as montar_nome_canal
+                nome_canal = montar_nome_canal('🤝', f'negoc-{user.name}-{projeto.titulo[:10]}')
 
-            # Enviar embed de negociação na thread
-            projeto_dict = asdict(projeto)
-            embed = criar_embed_negociacao(
-                projeto=projeto_dict,
-                dev_nome=user.mention,
-                empregador_nome=empregador.mention if empregador else empregador_nome,
-            )
-            view = NegociacaoView(candidatura_id=candidatura.id)
-            await thread.send(embed=embed, view=view)
+                # Definir permissões: apenas Dev, Empregador e bot podem ver
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                    guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, embed_links=True)
+                }
+                if empregador:
+                    overwrites[empregador] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-            # Responder ao dev
-            embed_resp = criar_embed_interesse_enviado(projeto.titulo)
-            await interaction.followup.send(
-                embed=embed_resp,
-                ephemeral=True,
-            )
+                # Criar canal de texto na categoria
+                thread = await guild.create_text_channel(
+                    name=nome_canal,
+                    category=cat_negociacao,
+                    overwrites=overwrites,
+                    reason=f'Negociação: {user.name} → {projeto.titulo}'
+                )
 
-            logger.info(
-                'Interesse registrado: dev=%s projeto=%s | match_score=%d',
-                user.name, projeto.id, compat['score_match'],
-            )
+                # Registrar candidatura
+                candidatura = Candidatura(
+                    id=_gerar_id('cand'),
+                    projeto_id=projeto.id,
+                    dev_id=user.id,
+                    dev_username=user.name,
+                    empregador_id=projeto.empregador_id,
+                    thread_id=thread.id,
+                    status='negociando',
+                )
+                salvar_candidatura(candidatura)
+                adicionar_candidato_projeto(projeto.id, user.id)
 
-        except Exception as e:
-            logger.exception('Erro ao processar interesse: %s', e)
-            await interaction.followup.send(
-                '❌ Ocorreu um erro ao processar seu interesse. Tente novamente.',
-                ephemeral=True,
-            )
+                # Registrar cooldown
+                registrar_cooldown(user.id, 'candidatura')
+
+                # Enviar embed de negociação na thread
+                projeto_dict = asdict(projeto)
+                embed = criar_embed_negociacao(
+                    projeto=projeto_dict,
+                    dev_nome=user.mention,
+                    empregador_nome=empregador.mention if empregador else empregador_nome,
+                )
+                view = NegociacaoView(candidatura_id=candidatura.id)
+                await thread.send(embed=embed, view=view)
+
+                # Responder ao dev
+                embed_resp = criar_embed_interesse_enviado(projeto.titulo)
+                await interaction.followup.send(
+                    embed=embed_resp,
+                    ephemeral=True,
+                )
+
+                logger.info(
+                    'Interesse registrado: dev=%s projeto=%s',
+                    user.name, projeto.id,
+                )
+
+            except Exception as e:
+                logger.exception('Erro ao processar interesse: %s', e)
+                await interaction.followup.send(
+                    '❌ Ocorreu um erro ao processar seu interesse. Tente novamente.',
+                    ephemeral=True,
+                )
 
 
 class NegociacaoView(View):
@@ -236,6 +286,11 @@ class NegociacaoView(View):
     async def callback_fechar(self, interaction: discord.Interaction):
         """Lógica de fechar parceria — ambos precisam clicar."""
         from core.database import buscar_candidatura, atualizar_candidatura
+
+        # Fechar parceria formaliza o contrato entre as partes — exige aceite dos Termos
+        from views.termos_views import exigir_aceite_termos
+        if not await exigir_aceite_termos(interaction):
+            return
 
         cand = buscar_candidatura(self.candidatura_id)
         if not cand:

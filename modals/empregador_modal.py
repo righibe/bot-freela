@@ -79,10 +79,8 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
             return
 
         # Processar campos
-        try:
-            valor = float(self.valor_projeto.value.replace('R$', '').replace('.', '').replace(',', '.').strip())
-        except ValueError:
-            valor = 0.0
+        from utils.helpers import parse_valor_brl
+        valor = parse_valor_brl(self.valor_projeto.value) or 0.0
 
         # Parse experiência e prazo
         experiencia = 'qualquer'
@@ -117,6 +115,26 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
             color=COR_ALERTA,
         )
         await interaction.response.send_message(embed=embed_proc)
+
+        # Validar valor do projeto ANTES de qualquer processamento
+        if valor < VALOR_MINIMO_PROJETO:
+            embed_valor = discord.Embed(
+                title='❌ Valor Inválido',
+                description=(
+                    f'O orçamento informado (`{self.valor_projeto.value}`) é inválido ou está abaixo do mínimo.\n'
+                    f'O valor do projeto deve ser de pelo menos **R$ {VALOR_MINIMO_PROJETO:.2f}**.\n\n'
+                    f'Formatos aceitos: `1500`, `1500,00`, `1.500,00`, `R$ 1500`'
+                ),
+                color=COR_ERRO,
+            )
+            await self.thread.send(embed=embed_valor)
+            import asyncio
+            await asyncio.sleep(20)
+            try:
+                await self.thread.delete()
+            except Exception:
+                pass
+            return
 
         projeto_aprovado = False
         try:
@@ -156,22 +174,6 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
                 valor=valor,
                 prazo=prazo,
             )
-
-            # Validar valor do projeto antes de enviar à API
-            if valor < VALOR_MINIMO_PROJETO:
-                embed_valor = discord.Embed(
-                    title='❌ Valor Inválido',
-                    description=f'O orçamento do projeto deve ser maior ou igual a **R$ {VALOR_MINIMO_PROJETO:.2f}** para manter o padrão da plataforma.',
-                    color=COR_ERRO
-                )
-                await self.thread.send(embed=embed_valor)
-                import asyncio
-                await asyncio.sleep(20)
-                try:
-                    await self.thread.delete()
-                except:
-                    pass
-                return
 
             if resultado is None:
                 # API offline — fazer validação básica local
@@ -360,10 +362,9 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
             categoria_projetos = guild.get_channel(CATEGORIA_PROJETOS_ID)
             
             if categoria_projetos and isinstance(categoria_projetos, discord.CategoryChannel):
-                import re
-                nome_canal = f"{self.categoria[:10].lower()}-{self.titulo_projeto.value[:15].lower().replace(' ', '-') }"
-                nome_canal = re.sub(r'[^a-z0-9\-]', '', nome_canal)
-                
+                from utils.helpers import nome_canal_projeto
+                nome_canal = nome_canal_projeto(self.categoria, self.titulo_projeto.value)
+
                 try:
                     canal_projeto = await guild.create_text_channel(nome_canal, category=categoria_projetos)
                     
@@ -371,12 +372,13 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
                     embed_listagem = criar_embed_projeto_listagem(asdict(projeto))
                     view = ProjetoInteresseView(projeto_id=projeto.id)
                     
-                    # Pings de stack
+                    # Pings de stack (cargos dinâmicos do banco)
                     pings = []
-                    from config.settings import CARGOS_LINGUAGEM
+                    from core.tecnologias import mapa_cargos
+                    cargos_tec = mapa_cargos()
                     for lang in linguagens:
-                        if lang in CARGOS_LINGUAGEM:
-                            cargo_lang = guild.get_role(CARGOS_LINGUAGEM[lang])
+                        if lang in cargos_tec:
+                            cargo_lang = guild.get_role(cargos_tec[lang])
                             if cargo_lang:
                                 pings.append(cargo_lang.mention)
                     
@@ -437,15 +439,16 @@ class EmpregadorModal(Modal, title='Cadastro de Projeto — Empregador'):
 
     def _inferir_stack(self, categoria: str, descricao: str) -> list[str]:
         """Infere a stack tecnológica baseada na categoria e descrição do projeto."""
-        from config.settings import STACK_POR_CATEGORIA, LINGUAGENS_OPCOES
+        from config.settings import STACK_POR_CATEGORIA
+        from core.tecnologias import nomes_ativas
 
         # Stack base por categoria
         stack_base = STACK_POR_CATEGORIA.get(categoria, [])
 
-        # Detectar tecnologias mencionadas na descrição
+        # Detectar tecnologias mencionadas na descrição (todas as ativas do banco)
         texto = descricao.lower()
         tecnologias_detectadas = []
-        for lang in LINGUAGENS_OPCOES:
+        for lang in nomes_ativas():
             if lang.lower() in texto:
                 tecnologias_detectadas.append(lang)
 

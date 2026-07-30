@@ -2,12 +2,18 @@ import discord
 from config.settings import COR_PRINCIPAL
 
 def criar_embed_verificacao() -> discord.Embed:
-    embed = discord.Embed(title='🔐  Verificação de Desenvolvedor', description='Para receber o cargo de **Desenvolvedor Verificado** e ter acesso completo ao servidor, você precisa passar por um processo de validação técnica.\n\nO processo analisa:\n>>> • Compatibilidade técnica com seu perfil\n• Integridade dos dados fornecidos\n• Coerência entre GitHub, LinkedIn e experiência\n\n', color=COR_PRINCIPAL)
-    embed.add_field(name='📋  Como funciona?', value='```\n1️⃣ Selecione suas linguagens de programação\n2️⃣ Informe seu tempo de experiência\n3️⃣ Preencha seu perfil profissional\n4️⃣ Aguarde a validação automática\n```', inline=False)
-    embed.add_field(name='⚙️  Requisitos mínimos', value='• Pelo menos **1 ano** de experiência em programação\n• Conta no **GitHub** com repositórios públicos\n• Perfil no **LinkedIn**\n• Mínimo de **2 linguagens** confirmadas no GitHub', inline=False)
-    embed.add_field(name='⏱️  Tempo estimado', value='A verificação leva de **1 a 3 minutos**.', inline=True)
-    embed.add_field(name='🔒  Privacidade', value='Seus dados são analisados em **thread privada**.', inline=True)
-    embed.set_footer(text='Freeela • Verificação Dev', icon_url='https://cdn.discordapp.com/embed/avatars/0.png')
+    embed = discord.Embed(
+        description=(
+            '## Verifique-se e comece a faturar 💻\n\n'
+            '**1.** Clique em **🚀 Iniciar Verificação**\n'
+            '**2.** Cole seu **GitHub**, marque suas **linguagens** e experiência\n'
+            '**3.** O bot confere e aprova **na hora** 🎉\n\n'
+            '✅ Precisa de: **1+ ano** programando e GitHub com **repositórios públicos** '
+            'mostrando pelo menos **2 linguagens**.'
+        ),
+        color=COR_PRINCIPAL,
+    )
+    embed.set_footer(text='Verificado? Cadastre seu PIX: /configurar_pagamento 💳')
     return embed
 
 def criar_embed_resultado_dev(resultado) -> discord.Embed:
@@ -50,29 +56,13 @@ def criar_embed_aprovado(user: discord.Member) -> discord.Embed:
 def criar_embed_atualizar_perfil() -> discord.Embed:
     """Embed para devs verificados atualizarem seu perfil."""
     embed = discord.Embed(
-        title='🔄  Atualizar Seu Perfil',
         description=(
-            'Você já é um **Desenvolvedor Verificado**! Mas se quiser adicionar novas linguagens, '
-            'atualizar sua experiência ou modificar sua descrição profissional, use o botão abaixo.\n\n'
-            '**Por que atualizar?**\n'
-            '• Adicionar novas linguagens e tecnologias\n'
-            '• Refletir aumento de experiência\n'
-            '• Melhorar seu perfil no servidor\n\n'
-            '⚠️ **Importante:** Sua atualização será validada novamente via GitHub e experiência será confirmada.'
+            '## Aprendeu coisa nova? Atualize seu perfil 🔄\n\n'
+            'Para quem **já é verificado**: clique no botão, preencha de novo '
+            '(GitHub, linguagens, experiência) e o bot revalida e atualiza seus cargos. ✅\n\n'
+            '⚠️ O GitHub é conferido de novo — só marque o que realmente aparece lá.'
         ),
-        color=COR_PRINCIPAL
+        color=COR_PRINCIPAL,
     )
-    embed.add_field(
-        name='📋  Como funciona?',
-        value=(
-            '```\n'
-            '1️⃣ Clique no botão "Atualizar Perfil"\n'
-            '2️⃣ Forneça seu GitHub e descrição\n'
-            '3️⃣ Aguarde a validação automática\n'
-            '4️⃣ Seus cargos serão atualizados\n'
-            '```'
-        ),
-        inline=False
-    )
-    embed.set_footer(text='Freeela • Atualização de Perfil', icon_url='https://cdn.discordapp.com/embed/avatars/0.png')
+    embed.set_footer(text='Sua chave PIX não muda ao atualizar o perfil 💳')
     return embed

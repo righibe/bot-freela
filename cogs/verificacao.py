@@ -53,6 +53,8 @@ class VerificacaoCog(commands.Cog):
         await canal.send(embed=embed, view=view)
         await interaction.response.send_message(f'✅ Embed de atualização de perfil enviada em {canal.mention}!', ephemeral=True)
         logger.info('Embed de atualização de perfil enviada por %s em #atualizar-perfil-dev', interaction.user.name)
+
+    @app_commands.command(name='status_verificacao', description='[STAFF] Diagnóstico do sistema de verificação (canais, cargos, permissões)')
     @app_commands.default_permissions(administrator=True)
     async def status_verificacao(self, interaction: discord.Interaction):
         guild = interaction.guild

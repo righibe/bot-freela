@@ -6,10 +6,7 @@ Usado por devs verificados que desejam adicionar/atualizar suas informações.
 import logging
 import discord
 from discord.ui import Modal, TextInput
-from config.settings import (
-    COR_SUCESSO, COR_ERRO, COR_ALERTA, LINGUAGENS_OPCOES,
-    CARGOS_LINGUAGEM, CARGOS_EXPERIENCIA, OPCOES_EXPERIENCIA
-)
+from config.settings import COR_SUCESSO, CARGOS_EXPERIENCIA
 from services.api_client import validar_dev_via_api
 from core.database import DevVerificado, salvar_dev, buscar_dev
 
@@ -127,28 +124,11 @@ class AtualizarPerfilDevModal(Modal, title='Atualizar Perfil de Dev'):
                     except Exception as e:
                         logger.error('Erro ao adicionar cargo de experiência: %s', e)
 
-            # Atualizar linguagens
-            linguagens_confirmadas = resultado_api.get('validated_languages', linguagens)
-
-            # Remover cargos de linguagens antigas
-            for lang, cargo_id in CARGOS_LINGUAGEM.items():
-                cargo = self.guild.get_role(cargo_id)
-                if cargo and cargo in user.roles and lang not in linguagens_confirmadas:
-                    try:
-                        await user.remove_roles(cargo, reason='Atualização de perfil')
-                    except Exception:
-                        pass
-
-            # Adicionar cargos de linguagens novas
-            for lang in linguagens_confirmadas:
-                if lang in CARGOS_LINGUAGEM:
-                    cargo_id = CARGOS_LINGUAGEM[lang]
-                    cargo = self.guild.get_role(cargo_id)
-                    if cargo and cargo not in user.roles:
-                        try:
-                            await user.add_roles(cargo, reason=f'Stack atualizada: {lang}')
-                        except Exception as e:
-                            logger.error('Erro ao adicionar cargo de linguagem %s: %s', lang, e)
+            # Atualizar tecnologias: mantém o perfil e ressincroniza os cargos
+            # dinamicamente a partir do banco
+            linguagens_confirmadas = resultado_api.get('validated_languages', linguagens) or linguagens
+            from core.tecnologias import sincronizar_cargos_membro
+            await sincronizar_cargos_membro(user, linguagens_confirmadas, remover_antigos=True)
 
             # Atualizar no banco de dados
             dev_atual.linguagens_confirmadas = linguagens_confirmadas

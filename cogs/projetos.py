@@ -57,12 +57,13 @@ class ProjetosCog(commands.Cog):
             color=COR_PROJETO,
         )
 
+        from utils.helpers import formatar_brl
         for p in projetos[:10]:  # Limite de 10
             langs = ', '.join(p.linguagens_requeridas[:5])
             embed.add_field(
                 name=f'{p.titulo}',
                 value=(
-                    f'💰 R$ {p.valor:,.2f} | 📂 {p.categoria}\n'
+                    f'💰 {formatar_brl(p.valor)} | 📂 {p.categoria}\n'
                     f'🛠️ {langs}\n'
                     f'📋 ID: `{p.id}`'
                 ),

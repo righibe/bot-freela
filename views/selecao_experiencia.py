@@ -152,8 +152,9 @@ class SelecaoExperienciaView(View):
         logger.info('Linguagens confirmadas: %s', resultado.linguagens_confirmadas)
         logger.info('Experiência: %s', experiencia)
 
-        from config.settings import CARGOS_LINGUAGEM, CARGOS_EXPERIENCIA
+        from config.settings import CARGOS_EXPERIENCIA
         from core.database import DevVerificado, salvar_dev
+        from core.tecnologias import sincronizar_cargos_membro
         
         # Cargo geral
         cargo = self._get_cargo_dev(guild)
@@ -190,16 +191,8 @@ class SelecaoExperienciaView(View):
                 '⚠️ Não foi possível atribuir o cargo **Desenvolvedor Verificado**. Verifique se eu tenho permissão **Manage Roles** e se meu cargo está acima de **Desenvolvedor Verificado** na hierarquia.'
             )
 
-        # Cargos específicos das linguagens
-        for lang in resultado.linguagens_confirmadas:
-            if lang in CARGOS_LINGUAGEM:
-                cargo_id = CARGOS_LINGUAGEM[lang]
-                cargo_lang = guild.get_role(cargo_id)
-                if cargo_lang:
-                    try:
-                        await user.add_roles(cargo_lang, reason=f'Stack confirmada: {lang}')
-                    except discord.Forbidden:
-                        pass
+        # Cargos das tecnologias selecionadas (criados dinamicamente se necessário)
+        await sincronizar_cargos_membro(user, self.linguagens, remover_antigos=False)
         
         # Cargo de experiência
         if experiencia in CARGOS_EXPERIENCIA:
@@ -215,8 +208,19 @@ class SelecaoExperienciaView(View):
         await self.thread.send(embed=embed_thread)
         
         embed_aprovado = criar_embed_aprovado(user)
-        embed_aprovado.add_field(name='Suas Linguagens', value=', '.join(resultado.linguagens_confirmadas), inline=False)
+        embed_aprovado.add_field(name='Suas Tecnologias', value=', '.join(self.linguagens), inline=False)
+        if resultado.linguagens_confirmadas:
+            embed_aprovado.add_field(
+                name='Confirmadas no GitHub',
+                value=', '.join(resultado.linguagens_confirmadas),
+                inline=False,
+            )
         embed_aprovado.add_field(name='Experiência', value=experiencia.replace('_', ' ').title(), inline=True)
+        embed_aprovado.add_field(
+            name='💳 Receba seus pagamentos',
+            value='Use o comando **/configurar_pagamento** para cadastrar sua chave PIX — os pagamentos dos projetos são enviados automaticamente para ela.',
+            inline=False,
+        )
         await self.thread.send(content=f'||{user.mention}||', embed=embed_aprovado)
         
         # Envia também um log (se quiser manter um histórico)
@@ -228,11 +232,12 @@ class SelecaoExperienciaView(View):
             except:
                 pass
                 
-        # Salvar dev verificado no banco local para permitir candidaturas e matching
+        # Salvar dev verificado no banco. O perfil guarda TODAS as tecnologias
+        # selecionadas (máx. 5) — a confirmação via GitHub já pesou nos scores.
         dev_salvo = DevVerificado(
             user_id=user.id,
             username=user.name,
-            linguagens_confirmadas=resultado.linguagens_confirmadas,
+            linguagens_confirmadas=self.linguagens,
             experiencia=experiencia,
             senioridade=resultado.senioridade,
             area=resultado.area_principal,
