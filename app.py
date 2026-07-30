@@ -73,6 +73,7 @@ COGS = [
     'cogs.tickets',        # Sistema de tickets de suporte
     'cogs.tecnologias',    # Registro e sugestão de tecnologias
     'cogs.staff',          # Comandos administrativos (/registrar, /vincular...)
+    'cogs.sincronizacao',  # Discord ↔ banco: exclusões manuais não quebram nada
 ]
 
 

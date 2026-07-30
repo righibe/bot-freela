@@ -12,6 +12,12 @@ load_dotenv()
 # ══════════════════════════════════════════════════════
 #  CANAIS
 # ══════════════════════════════════════════════════════
+# O bot NÃO cria nem renomeia canais: a staff monta a estrutura como quiser
+# e vincula cada função com /configurar_canal (o comando grava os IDs aqui).
+# ID 0 = função ainda sem canal vinculado.
+CANAL_COMECE_AQUI = 0
+CANAL_TERMOS = 0
+CANAL_SUGERIR_TEC = 0
 CANAL_VERIFICAR_DEV = 1525187271660277760
 CANAL_VERIFICAR_EMPREGADOR = 1503840999615758386          # Atualizar com o ID real
 CANAL_ATUALIZAR_PERFIL_DEV = 1525187274331914250                            # Atualizar com o ID real

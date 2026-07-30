@@ -58,8 +58,10 @@ def criar_embed_atualizar_perfil() -> discord.Embed:
     embed = discord.Embed(
         description=(
             '## Aprendeu coisa nova? Atualize seu perfil 🔄\n\n'
-            'Para quem **já é verificado**: clique no botão, preencha de novo '
-            '(GitHub, linguagens, experiência) e o bot revalida e atualiza seus cargos. ✅\n\n'
+            'Para quem **já é verificado** — em 3 etapas rápidas:\n\n'
+            '**1.** 🔗 Atualize seu **GitHub** e **LinkedIn** (já vêm preenchidos)\n'
+            '**2.** 🛠️ Marque suas **tecnologias** de novo (as atuais já vêm selecionadas)\n'
+            '**3.** 📈 Confirme sua **experiência** — o bot revalida e troca seus cargos na hora ✅\n\n'
             '⚠️ O GitHub é conferido de novo — só marque o que realmente aparece lá.'
         ),
         color=COR_PRINCIPAL,

@@ -259,6 +259,7 @@ def _criar_tabelas(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_projetos_status ON projetos(status);
         CREATE INDEX IF NOT EXISTS idx_projetos_empregador ON projetos(empregador_id);
+        CREATE INDEX IF NOT EXISTS idx_projetos_canal_listagem ON projetos(canal_listagem_id);
 
         CREATE TABLE IF NOT EXISTS candidaturas (
             id TEXT PRIMARY KEY,
@@ -615,6 +616,40 @@ def adicionar_candidato_projeto(projeto_id: str, dev_id: int) -> None:
         _salvar('projetos', projeto)
 
 
+def remover_candidato_projeto(projeto_id: str, dev_id: int) -> None:
+    """Remove um candidato do projeto (libera o dev para se candidatar de novo)."""
+    projeto = buscar_projeto(projeto_id)
+    if projeto and dev_id in projeto.candidatos:
+        projeto.candidatos.remove(dev_id)
+        _salvar('projetos', projeto)
+
+
+def buscar_projeto_por_canal_listagem(canal_id: int) -> Optional[Projeto]:
+    """Busca um projeto pelo canal de vitrine onde ele foi publicado."""
+    if not canal_id:
+        return None
+    conn = _get_conn()
+    linha = conn.execute(
+        'SELECT * FROM projetos WHERE canal_listagem_id = ?', (canal_id,)
+    ).fetchone()
+    return _de_linha(Projeto, linha) if linha else None
+
+
+def listar_projetos_empregador(empregador_id: int, status: Optional[str] = None) -> list[Projeto]:
+    """Lista projetos de um empregador, opcionalmente filtrados por status."""
+    conn = _get_conn()
+    if status:
+        linhas = conn.execute(
+            'SELECT * FROM projetos WHERE empregador_id = ? AND status = ?',
+            (empregador_id, status),
+        ).fetchall()
+    else:
+        linhas = conn.execute(
+            'SELECT * FROM projetos WHERE empregador_id = ?', (empregador_id,)
+        ).fetchall()
+    return [_de_linha(Projeto, l) for l in linhas]
+
+
 # ══════════════════════════════════════════════════════
 #  CANDIDATURAS
 # ══════════════════════════════════════════════════════
@@ -666,6 +701,15 @@ def contar_candidaturas() -> tuple[int, int]:
     total = conn.execute('SELECT COUNT(*) FROM candidaturas').fetchone()[0]
     ativas = conn.execute("SELECT COUNT(*) FROM candidaturas WHERE status = 'negociando'").fetchone()[0]
     return ativas, total
+
+
+def listar_candidaturas_dev_por_status(dev_id: int, status: str = 'negociando') -> list[Candidatura]:
+    """Lista candidaturas de um dev com determinado status."""
+    conn = _get_conn()
+    linhas = conn.execute(
+        'SELECT * FROM candidaturas WHERE dev_id = ? AND status = ?', (dev_id, status)
+    ).fetchall()
+    return [_de_linha(Candidatura, l) for l in linhas]
 
 
 def contar_candidaturas_dev_hoje(dev_id: int) -> int:
@@ -730,6 +774,56 @@ def listar_projetos_ativos_por_status(status: str) -> list[ProjetoAtivo]:
     conn = _get_conn()
     linhas = conn.execute('SELECT * FROM projetos_ativos WHERE status = ?', (status,)).fetchall()
     return [_de_linha(ProjetoAtivo, l) for l in linhas]
+
+
+def buscar_projeto_ativo_por_ambiente(canal_id: int) -> Optional[ProjetoAtivo]:
+    """Busca um projeto ativo por qualquer canal do ambiente (texto, voz ou categoria)."""
+    if not canal_id:
+        return None
+    conn = _get_conn()
+    linha = conn.execute(
+        'SELECT * FROM projetos_ativos '
+        'WHERE canal_texto_id = ? OR canal_voz_id = ? OR categoria_id = ?',
+        (canal_id, canal_id, canal_id),
+    ).fetchone()
+    return _de_linha(ProjetoAtivo, linha) if linha else None
+
+
+def listar_projetos_ativos_empregador(empregador_id: int) -> list[ProjetoAtivo]:
+    """Lista projetos em execução (ou aguardando pagamento) de um empregador."""
+    conn = _get_conn()
+    linhas = conn.execute(
+        "SELECT * FROM projetos_ativos WHERE empregador_id = ? "
+        "AND status IN ('ativo', 'aguardando_pagamento')",
+        (empregador_id,),
+    ).fetchall()
+    return [_de_linha(ProjetoAtivo, l) for l in linhas]
+
+
+def recalcular_projetos_ativos_devs() -> int:
+    """
+    Recalcula o contador projetos_ativos de todos os devs a partir da tabela
+    projetos_ativos (fonte da verdade). Corrige contadores que ficaram
+    inconsistentes após exclusões manuais. Retorna quantos devs foram corrigidos.
+    """
+    conn = _get_conn()
+    with _lock:
+        cursor = conn.execute('''
+            UPDATE devs SET projetos_ativos = (
+                SELECT COUNT(*) FROM projetos_ativos pa
+                WHERE pa.dev_id = devs.user_id
+                  AND pa.status IN ('ativo', 'aguardando_pagamento')
+            )
+            WHERE projetos_ativos != (
+                SELECT COUNT(*) FROM projetos_ativos pa
+                WHERE pa.dev_id = devs.user_id
+                  AND pa.status IN ('ativo', 'aguardando_pagamento')
+            )
+        ''')
+        conn.commit()
+    if cursor.rowcount:
+        logger.info('Contador de projetos ativos corrigido para %d devs', cursor.rowcount)
+    return cursor.rowcount
 
 
 def contar_projetos_ativos(status: str = 'ativo') -> int:
@@ -958,6 +1052,12 @@ def fechar_ticket(canal_id: int) -> Optional[Ticket]:
 def contar_tickets(status: str = 'aberto') -> int:
     conn = _get_conn()
     return conn.execute('SELECT COUNT(*) FROM tickets WHERE status = ?', (status,)).fetchone()[0]
+
+
+def listar_tickets_por_status(status: str = 'aberto') -> list[Ticket]:
+    conn = _get_conn()
+    linhas = conn.execute('SELECT * FROM tickets WHERE status = ?', (status,)).fetchall()
+    return [_de_linha(Ticket, l) for l in linhas]
 
 
 # ══════════════════════════════════════════════════════

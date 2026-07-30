@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 from discord import app_commands
-from config.settings import CANAL_VERIFICAR_EMPREGADOR
+import config.settings as settings
 from embeds.empregador_embed import criar_embed_verificacao_empregador
 from views.empregador_views import IniciarEmpregadorView
 
@@ -38,10 +38,10 @@ class EmpregadorCog(commands.Cog):
             )
             return
 
-        canal = guild.get_channel(CANAL_VERIFICAR_EMPREGADOR)
+        canal = guild.get_channel(settings.CANAL_VERIFICAR_EMPREGADOR)
         if not canal:
             await interaction.response.send_message(
-                f'❌ Canal verificar-empregador (ID: {CANAL_VERIFICAR_EMPREGADOR}) não encontrado.\n'
+                f'❌ Canal verificar-empregador (ID: {settings.CANAL_VERIFICAR_EMPREGADOR}) não encontrado.\n'
                 f'Atualize o ID em `config/settings.py`.',
                 ephemeral=True,
             )

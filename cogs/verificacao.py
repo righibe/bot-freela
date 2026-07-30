@@ -2,7 +2,7 @@ import logging
 import discord
 from discord.ext import commands
 from discord import app_commands
-from config.settings import CANAL_VERIFICAR_DEV, CANAL_ATUALIZAR_PERFIL_DEV
+import config.settings as settings
 from embeds.verificacao_embed import criar_embed_verificacao, criar_embed_atualizar_perfil
 from views.iniciar_verificacao import IniciarVerificacaoView
 from views.atualizar_perfil_dev import AtualizarPerfilDevView
@@ -26,9 +26,9 @@ class VerificacaoCog(commands.Cog):
         if not guild:
             await interaction.response.send_message('❌ Este comando só pode ser usado em um servidor.', ephemeral=True)
             return
-        canal = guild.get_channel(CANAL_VERIFICAR_DEV)
+        canal = guild.get_channel(settings.CANAL_VERIFICAR_DEV)
         if not canal:
-            await interaction.response.send_message(f'❌ Canal verificar-dev (ID: {CANAL_VERIFICAR_DEV}) não encontrado.', ephemeral=True)
+            await interaction.response.send_message(f'❌ Canal verificar-dev (ID: {settings.CANAL_VERIFICAR_DEV}) não encontrado.', ephemeral=True)
             return
         embed = criar_embed_verificacao()
         view = IniciarVerificacaoView()
@@ -43,9 +43,9 @@ class VerificacaoCog(commands.Cog):
         if not guild:
             await interaction.response.send_message('❌ Este comando só pode ser usado em um servidor.', ephemeral=True)
             return
-        canal = guild.get_channel(CANAL_ATUALIZAR_PERFIL_DEV)
+        canal = guild.get_channel(settings.CANAL_ATUALIZAR_PERFIL_DEV)
         if not canal:
-            await interaction.response.send_message(f'❌ Canal atualizar-perfil-dev (ID: {CANAL_ATUALIZAR_PERFIL_DEV}) não encontrado.', ephemeral=True)
+            await interaction.response.send_message(f'❌ Canal atualizar-perfil-dev (ID: {settings.CANAL_ATUALIZAR_PERFIL_DEV}) não encontrado.', ephemeral=True)
             return
         
         embed = criar_embed_atualizar_perfil()
@@ -60,7 +60,7 @@ class VerificacaoCog(commands.Cog):
         guild = interaction.guild
         if not guild:
             return
-        canal_verif = guild.get_channel(CANAL_VERIFICAR_DEV)
+        canal_verif = guild.get_channel(settings.CANAL_VERIFICAR_DEV)
         canal_diag = guild.get_channel(1497289159344128081)
         canal_review = guild.get_channel(1497293598818045982)
         embed = discord.Embed(title='📊  Status do Sistema de Verificação', color=5793266)

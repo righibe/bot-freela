@@ -5,9 +5,12 @@ O sistema é orientado ao banco de dados — estes comandos permitem à staff
 registrar/corrigir informações manualmente (ex.: verificação do GitHub
 falhou e o usuário abriu um ticket) com sincronização automática dos cargos.
 
-- /registrar    cadastra ou substitui o perfil completo de um dev
-- /vincular     adiciona UMA tecnologia ao perfil de um dev
-- /desvincular  remove UMA tecnologia do perfil de um dev
+- /registrar         cadastra ou substitui o perfil completo de um dev
+- /vincular          adiciona UMA tecnologia ao perfil de um dev
+- /desvincular       remove UMA tecnologia do perfil de um dev
+- /configurar_canal  vincula um canal/categoria existente a uma função do bot
+- /canais            mostra o mapa de funções → canais vinculados
+- /repostar_cards    reposta os cards interativos nos canais vinculados
 """
 
 import logging
@@ -25,6 +28,7 @@ from core.tecnologias import (
     nomes_ativas, normalizar_nome, validar_lista_tecnologias,
     sincronizar_cargos_membro,
 )
+from core.setup_manager import FUNCOES_CANAL, atualizar_settings, repostar_todos_cards
 from utils.helpers import estimar_senioridade, estimar_area, experiencia_label
 
 logger = logging.getLogger('bot_freeela.cogs.staff')
@@ -32,6 +36,11 @@ logger = logging.getLogger('bot_freeela.cogs.staff')
 CHOICES_EXPERIENCIA = [
     app_commands.Choice(name=label, value=valor)
     for label, valor in OPCOES_EXPERIENCIA
+]
+
+CHOICES_FUNCAO_CANAL = [
+    app_commands.Choice(name=cfg['label'], value=chave)
+    for chave, cfg in FUNCOES_CANAL.items()
 ]
 
 
@@ -299,6 +308,121 @@ class StaffCog(commands.Cog):
             f'🛠️ **Desvínculo manual**: {interaction.user.mention} removeu `{nome}` de {usuario.mention}',
         )
         logger.info('%s desvinculou %s de %s', interaction.user.name, nome, usuario.name)
+
+
+    # ══════════════════════════════════════════════════
+    #  /configurar_canal
+    # ══════════════════════════════════════════════════
+
+    @app_commands.command(
+        name='configurar_canal',
+        description='[STAFF] Vincula um canal/categoria já existente a uma função do bot',
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        funcao='Função do bot que esse canal vai exercer',
+        canal='O canal (ou categoria) que você criou para essa função',
+    )
+    @app_commands.choices(funcao=CHOICES_FUNCAO_CANAL)
+    async def configurar_canal(
+        self,
+        interaction: discord.Interaction,
+        funcao: app_commands.Choice[str],
+        canal: discord.abc.GuildChannel,
+    ):
+        cfg = FUNCOES_CANAL[funcao.value]
+
+        if cfg['categoria'] and not isinstance(canal, discord.CategoryChannel):
+            await interaction.response.send_message(
+                f'❌ A função **{cfg["label"]}** precisa de uma **categoria**, '
+                f'e {canal.mention} não é uma categoria.',
+                ephemeral=True,
+            )
+            return
+        if not cfg['categoria'] and not isinstance(canal, discord.TextChannel):
+            await interaction.response.send_message(
+                f'❌ A função **{cfg["label"]}** precisa de um **canal de texto**, '
+                f'e `{canal.name}` não é um canal de texto.',
+                ephemeral=True,
+            )
+            return
+
+        atualizar_settings({cfg['attr']: canal.id}, {})
+        setattr(settings, cfg['attr'], canal.id)
+
+        destino = canal.mention if isinstance(canal, discord.TextChannel) else f'`{canal.name}`'
+        dica = (
+            '\n💡 Use **/repostar_cards** para publicar o card interativo nele.'
+            if cfg['card'] else ''
+        )
+        await interaction.response.send_message(
+            f'✅ Função **{cfg["label"]}** vinculada a {destino}.{dica}',
+            ephemeral=True,
+        )
+        logger.info(
+            '%s vinculou a função %s ao canal %s (%d)',
+            interaction.user.name, funcao.value, canal.name, canal.id,
+        )
+
+    # ══════════════════════════════════════════════════
+    #  /canais
+    # ══════════════════════════════════════════════════
+
+    @app_commands.command(
+        name='canais',
+        description='[STAFF] Mostra o mapa de funções do bot → canais vinculados',
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def canais(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        linhas = []
+        pendentes = 0
+        for chave, cfg in FUNCOES_CANAL.items():
+            canal_id = getattr(settings, cfg['attr'], 0)
+            canal = guild.get_channel(canal_id) if canal_id else None
+            if canal:
+                destino = canal.mention if isinstance(canal, discord.TextChannel) else f'`{canal.name}`'
+                linhas.append(f'✅ {cfg["label"]} → {destino}')
+            else:
+                linhas.append(f'⚠️ {cfg["label"]} → **não vinculado**')
+                pendentes += 1
+
+        embed = discord.Embed(
+            title='🗺️  Funções do Bot → Canais',
+            description='\n'.join(linhas),
+            color=COR_SUCESSO if pendentes == 0 else COR_ERRO,
+        )
+        embed.set_footer(
+            text=(
+                'Tudo vinculado! 🎉' if pendentes == 0 else
+                f'{pendentes} função(ões) sem canal — use /configurar_canal'
+            )
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ══════════════════════════════════════════════════
+    #  /repostar_cards
+    # ══════════════════════════════════════════════════
+
+    @app_commands.command(
+        name='repostar_cards',
+        description='[STAFF] Reposta os cards interativos nos canais vinculados',
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def repostar_cards(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        postados, faltando = await repostar_todos_cards(interaction.guild)
+
+        msg = ''
+        if postados:
+            msg += '✅ Cards repostados: ' + ', '.join(f'`{c}`' for c in postados)
+        if faltando:
+            faltando_cards = [c for c in faltando if FUNCOES_CANAL[c]['card']]
+            if faltando_cards:
+                msg += '\n⚠️ Sem canal vinculado: ' + ', '.join(f'`{c}`' for c in faltando_cards)
+                msg += '\nUse **/configurar_canal** para vinculá-los.'
+        await interaction.followup.send(msg or '⚠️ Nenhum canal vinculado ainda.', ephemeral=True)
+        logger.info('%s repostou os cards (%d canais)', interaction.user.name, len(postados))
 
 
 async def setup(bot: commands.Bot):
